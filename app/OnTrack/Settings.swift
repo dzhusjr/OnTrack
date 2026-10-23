@@ -27,6 +27,8 @@ struct Settings {
     }
 
     var echoCancellation: Bool {
-        defaults.object(forKey: "echoCancellation") as? Bool ?? true
+        // Off by default: Apple voice processing fails or returns silence on some Macs (-10875).
+        // Enable with: defaults write com.romandzhus.ontrack echoCancellation -bool true
+        defaults.object(forKey: "echoCancellation") as? Bool ?? false
     }
 }

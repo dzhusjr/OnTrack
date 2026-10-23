@@ -83,8 +83,9 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         // Voice processing is an I/O unit: the output side must be part of the running graph,
         // otherwise macOS delivers all-zero input buffers.
-        let mixer = engine.mainMixerNode
-        mixer.outputVolume = 0
+        if voiceProcessingOn {
+            engine.mainMixerNode.outputVolume = 0
+        }
         micResampler = Resampler16k(from: Resampler16k.firstChannelFormat(of: format))
         micLock.lock()
         micChunker.reset()
@@ -96,7 +97,15 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
         do {
             try engine.start()
         } catch {
+            if voiceProcessingOn {
+                NSLog("OnTrack: mic failed with voice processing (%@) — retrying without", error.localizedDescription)
+                input.removeTap(onBus: 0)
+                engine.stop()
+                startMic(voiceProcessing: false)
+                return
+            }
             report("Microphone failed to start: \(error.localizedDescription)")
+            return
         }
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
