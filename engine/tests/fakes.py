@@ -30,3 +30,33 @@ def frames(samples: np.ndarray, channel: Channel, start_ns: int = 0) -> list[Aud
         AudioFrame(channel, start_ns + (i // FRAME_SAMPLES) * step, x[i : i + FRAME_SAMPLES].copy())
         for i in range(0, len(x), FRAME_SAMPLES)
     ]
+
+
+# ---- Task 5: ASR ---------------------------------------------------------
+from ontrack.types import Transcript, Utterance  # noqa: E402
+
+
+def tr(text: str, lang: str = "en") -> Transcript:
+    return Transcript(text, lang, -0.2, 0.0, 1.0)
+
+
+def utt(channel: Channel = Channel.MIC, t_start: float = 0.0, t_end: float = 2.0, amp: float = 0.3) -> Utterance:
+    n = int(round((t_end - t_start) * SAMPLE_RATE))
+    return Utterance(channel, t_start, t_end, np.full(n, amp, np.float32))
+
+
+class FakeAsr:
+    """Scripted backend: queue of (lang_probs, Transcript); records (language, initial_prompt)."""
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls: list[tuple[str, str | None]] = []
+        self._current = None
+
+    def detect_language(self, samples):
+        self._current = self.script.pop(0)
+        return self._current[0]
+
+    def run(self, samples, language, initial_prompt):
+        self.calls.append((language, initial_prompt))
+        return self._current[1]
