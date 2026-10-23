@@ -136,3 +136,49 @@ final class OverlayReducerReviewTests: XCTestCase {
         XCTAssertEqual(s.toast, "Previous session saved to notes")
     }
 }
+
+final class LivePreviewTests: XCTestCase {
+    private func start(_ s: inout OverlayState) {
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+    }
+
+    func testPartialShownThenClearedByMatchingUtterance() {
+        var s = OverlayState(maxLines: 3)
+        start(&s)
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 4.0, text: "so the")))
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 4.0, text: "so the eigenvalues")))
+        XCTAssertEqual(s.partials.map(\.text), ["so the eigenvalues"])
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 2.0, text: "")))  // older utterance: keep preview
+        XCTAssertEqual(s.partials.count, 1)
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 4.0, text: "")))
+        XCTAssertTrue(s.partials.isEmpty)
+    }
+
+    func testPartialsPerChannelAndOtherSessionIgnored() {
+        var s = OverlayState()
+        start(&s)
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 1, text: "me talking")))
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 1, tStart: 1.5, text: "zoom talking")))
+        reduce(&s, .engine(.partial(sessionId: "old", channel: 0, tStart: 9, text: "stale")))
+        XCTAssertEqual(s.partials.map(\.text), ["me talking", "zoom talking"])
+    }
+
+    func testVisibleLinesLeaveRoomForPreview() {
+        var s = OverlayState(maxLines: 3)
+        start(&s)
+        for i in 0..<3 {
+            reduce(&s, .engine(.line(TranscriptLine(sessionId: "s1", seq: i, speaker: "Me", tStart: Double(i), tEnd: Double(i) + 1, lang: "en", text: "l\(i)"))))
+        }
+        XCTAssertEqual(s.visibleLines.map(\.text), ["l0", "l1", "l2"])
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 5, text: "live")))
+        XCTAssertEqual(s.visibleLines.map(\.text), ["l1", "l2"])  // 2 final + 1 preview = 3 rows
+    }
+
+    func testStoppingClearsPreviews() {
+        var s = OverlayState()
+        start(&s)
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 1, text: "half a sen")))
+        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 5, lineCount: 0)))
+        XCTAssertTrue(s.partials.isEmpty)
+    }
+}

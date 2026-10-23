@@ -29,9 +29,10 @@ def dirs(tmp_path):
     shutil.rmtree(sock, ignore_errors=True)
 
 
-def make_service(dirs, asr_script=(), runner_script=()):
+def make_service(dirs, asr_script=(), runner_script=(), live_preview=False):
     sock, tmp = dirs
-    cfg = replace(load_config(None), app_support_dir=sock, sessions_dir=tmp / "sessions", notes_dir=tmp / "notes")
+    cfg = replace(load_config(None), app_support_dir=sock, sessions_dir=tmp / "sessions", notes_dir=tmp / "notes",
+                  live_preview=live_preview)  # previews consume scripted ASR answers; on only where tested
     backends = Backends(EnergyVad, FakeAsr(list(asr_script)), FakeEmbedder())
     return EngineService(cfg, backends, FakeRunner(list(runner_script)), diarizer=Diar()), cfg
 
@@ -366,3 +367,20 @@ def test_locked_asr_serialises_calls():  # review M2 #10
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert peak[0] == 1
+
+
+def test_partial_messages_reach_the_app(dirs):
+    svc, cfg = make_service(dirs, [({"en": 1}, tr(f"t{i}")) for i in range(20)], live_preview=True)
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(np.concatenate([tone(2.0), silence(1.0)]), Channel.MIC))
+        part = await c.expect(lambda m: m["type"] == "partial" and m["text"])
+        assert part["session_id"] == st["session_id"] and part["channel"] == 0
+        await c.expect(lambda m: m["type"] == "partial" and m["text"] == "")
+        await c.expect(typ("line"))
+        await c.close()
+
+    asyncio.run(run_with(svc, body))

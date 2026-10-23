@@ -20,6 +20,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "pong": ("state",),
     "status": ("state", "model_ready", "session_id", "degraded"),
     "line": ("session_id", "seq", "speaker", "t_start", "t_end", "lang", "text"),
+    "partial": ("session_id", "channel", "t_start", "text"),  # live preview of the phrase being spoken; "" clears
     "answer_delta": ("id", "text"),
     "answer_done": ("id",),
     "session_stopped": ("session_id", "duration_s", "line_count"),

@@ -72,6 +72,7 @@ class Pipeline:
         voiceprint: np.ndarray | None,
         on_line: Callable[[Line], None] | None = None,
         fallback_asr: AsrBackend | None = None,
+        on_partial: Callable[[Channel, float, str], None] | None = None,
     ) -> None:
         self.cfg = cfg
         self.backends = backends
@@ -84,6 +85,8 @@ class Pipeline:
         self._fallback_asr = fallback_asr
         self._degraded = False
         self._held: list[Utterance] = []  # mic utterances waiting for overlapping system audio
+        self.on_partial = on_partial
+        self._preview_at: dict[Channel, tuple[float, float]] = {}  # channel -> (utterance start, position)
         self._origin: int | None = writer.origin_ns  # resumed sessions keep their time origin
         self._segmenters: dict[Channel, Segmenter] = {}
 
@@ -101,6 +104,25 @@ class Pipeline:
             else:
                 self._handle(u)
         self._release_held()
+        self._maybe_preview(frame.channel, seg)
+
+    def _maybe_preview(self, channel: Channel, seg: Segmenter) -> None:
+        if self.on_partial is None or not self.cfg.live_preview or self._degraded:
+            return
+        start = seg.open_start_s
+        if start is None:
+            return
+        pos = seg.position_s
+        last = self._preview_at.get(channel)
+        due = last is None or last[0] != start or pos - last[1] >= self.cfg.preview_interval_s
+        if pos - start < self.cfg.preview_min_s or not due:
+            return
+        self._preview_at[channel] = (start, pos)
+        samples = seg.open_samples()
+        t = self.transcriber.preview(Utterance(channel, start, pos, samples))
+        text = t.text.strip()
+        if text and not is_hallucination(t):
+            self.on_partial(channel, start, text)
 
     def finish(self) -> None:
         pending: list[Utterance] = list(self._held)
@@ -144,6 +166,8 @@ class Pipeline:
         self._held = keep
 
     def _handle(self, u: Utterance) -> None:
+        if self.on_partial is not None and self.cfg.live_preview:
+            self.on_partial(u.channel, u.t_start, "")  # the final line (or nothing) replaces the preview
         t0 = time.perf_counter()
         t = self.transcriber.transcribe(u)
         if is_hallucination(t):

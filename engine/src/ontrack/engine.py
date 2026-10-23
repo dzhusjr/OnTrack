@@ -189,6 +189,10 @@ class EngineService:
     def _error(self, code: str, message: str, recoverable: bool = True) -> dict:
         return {"type": "error", "code": code, "message": message, "recoverable": recoverable}
 
+    def _partial(self, channel: Channel, t_start: float, text: str) -> None:
+        self.send({"type": "partial", "session_id": self.writer.id if self.writer else None,
+                   "channel": int(channel), "t_start": round(t_start, 3), "text": text})
+
     def _line_msg(self, line: Line) -> dict:
         return {
             "type": "line", "session_id": self.writer.id if self.writer else None, "seq": line.seq,
@@ -350,7 +354,8 @@ class EngineService:
         if self.pipeline is None:
             self.pipeline = Pipeline(self.cfg, self.backends, self.writer, self._voiceprint,
                                      on_line=lambda line: self.send(self._line_msg(line)),
-                                     fallback_asr=self.fallback_asr)
+                                     fallback_asr=self.fallback_asr,
+                                     on_partial=self._partial)
         if self.recorder is None:
             self.recorder = AudioRecorder(self._audio_dir(self.writer.id), origin)
         t_now = (f.t_ns - origin) / 1e9

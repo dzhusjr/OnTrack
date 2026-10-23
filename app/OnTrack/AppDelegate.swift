@@ -218,6 +218,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             # claude_path = ""            # full path to `claude` if OnTrack can't find it
             # allowed_langs = ["en", "uk", "ru"]   # order breaks ties (uk before ru); drop languages you never speak
             # retranscribe = true         # re-run Whisper after the session for a cleaner final transcript
+            # live_preview = true         # grey word-by-word preview while someone speaks (more GPU / battery)
+            # preview_interval_s = 0.7    # how often the preview updates
 
             """
             try? template.write(to: url, atomically: true, encoding: .utf8)

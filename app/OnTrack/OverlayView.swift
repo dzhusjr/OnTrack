@@ -38,6 +38,7 @@ struct OverlayView: View {
         .onExitCommand { store.send(.escape) }
         .onChange(of: s.mode) { _, mode in questionFocused = (mode == .expanded) }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: s.lines)
+        .animation(reduceMotion ? nil : .linear(duration: 0.08), value: s.partials)
     }
 
     // MARK: live lines
@@ -45,21 +46,35 @@ struct OverlayView: View {
     private var liveSection: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
-                if s.lines.isEmpty {
+                if s.lines.isEmpty && s.partials.isEmpty {
                     Text(!s.modelReady ? "Loading speech model…" : (s.recording ? "Listening…" : "Not recording — ⌥⇧S to start"))
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
-                ForEach(Array(s.lines.enumerated()), id: \.element.seq) { index, line in
+                let shown = s.visibleLines
+                ForEach(Array(shown.enumerated()), id: \.element.seq) { index, line in
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Circle().fill(Self.color(for: line.speaker)).frame(width: 7, height: 7)
                         Text(line.text)
                             .font(.system(size: 13))
-                            .foregroundStyle(line.speaker == "Note" ? .secondary : .primary)
+                            .foregroundStyle(line.speaker == "Note" ? Color.secondary : Color.primary)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .opacity(index == s.lines.count - 1 ? 1 : 0.5 + 0.25 * Double(index) / Double(max(1, s.lines.count - 1)))
+                    .opacity(s.partials.isEmpty && index == shown.count - 1 ? 1 : 0.55 + 0.3 * Double(index) / Double(max(1, shown.count)))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                ForEach(s.partials, id: \.channel) { p in  // live word-by-word preview (grey, replaced by the final line)
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Circle().strokeBorder(p.channel == 1 ? Color.green : Color.secondary, lineWidth: 1.2)
+                            .frame(width: 7, height: 7)
+                        Text(p.text)
+                            .font(.system(size: 13))
+                            .italic()
+                            .foregroundStyle(Color.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.head)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             Spacer(minLength: 4)

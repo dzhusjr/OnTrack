@@ -52,6 +52,7 @@ public enum Inbound: Equatable, Sendable {
     case pong(id: String?, state: String)
     case status(EngineStatus)
     case line(TranscriptLine)
+    case partial(sessionId: String, channel: Int, tStart: Double, text: String)
     case answerDelta(id: String, text: String)
     case answerDone(id: String)
     case sessionStopped(sessionId: String, durationS: Double, lineCount: Int)
@@ -79,6 +80,7 @@ public enum Inbound: Equatable, Sendable {
         let stage: String?
         let pct: Double?
         let notes_path: String?
+        let channel: Int?
         let score: Double?
         let code: String?
         let message: String?
@@ -104,6 +106,9 @@ public enum Inbound: Equatable, Sendable {
             return .line(TranscriptLine(sessionId: r.session_id ?? "", seq: try need(r.seq), speaker: try need(r.speaker),
                                         tStart: try need(r.t_start), tEnd: try need(r.t_end), lang: r.lang ?? "",
                                         text: try need(r.text)))
+        case "partial":
+            return .partial(sessionId: r.session_id ?? "", channel: try need(r.channel), tStart: try need(r.t_start),
+                            text: try need(r.text))
         case "answer_delta": return .answerDelta(id: try need(r.id), text: try need(r.text))
         case "answer_done": return .answerDone(id: try need(r.id))
         case "session_stopped":

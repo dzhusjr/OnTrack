@@ -16,3 +16,4 @@
 {"type":"finalize_done","session_id":"2026-10-23-1405-linear-algebra","notes_path":"/Users/dzhus/Desktop/Work/OnTrack/notes/2026-10-23-1405-linear-algebra"}
 {"type":"enroll_done","score":0.93}
 {"type":"error","code":"llm_missing","message":"Claude Code CLI not found","recoverable":true}
+{"type":"partial","session_id":"2026-10-23-1405-linear-algebra","channel":0,"t_start":12.8,"text":"so the eigen"}

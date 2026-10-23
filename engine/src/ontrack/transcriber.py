@@ -28,6 +28,7 @@ class Transcriber:
         self.backend = backend
         self.cfg = cfg
         self._context: dict[Channel, deque[tuple[str | None, str]]] = {}
+        self._last_lang: dict[Channel, str] = {}
 
     def _ctx(self, channel: Channel) -> deque[tuple[str | None, str]]:
         return self._context.setdefault(channel, deque(maxlen=8))
@@ -45,7 +46,18 @@ class Transcriber:
         results = [(l, self.backend.run(u.samples, l, self._prompt(u.channel, l))) for l in candidates]
         best_lp = max(t.avg_logprob for _, t in results)
         close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - TIE_LOGPROB]
-        return min(close, key=lambda lt: allowed.index(lt[0]))[1]
+        lang, best = min(close, key=lambda lt: allowed.index(lt[0]))
+        self._last_lang[u.channel] = lang
+        return best
+
+    def preview(self, u: Utterance) -> Transcript:
+        """Cheap single decode of an unfinished phrase, in the channel's current language."""
+        lang = self._last_lang.get(u.channel)
+        if lang is None:
+            probs = self.backend.detect_language(u.samples)
+            allowed = list(self.cfg.allowed_langs)
+            lang = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))[0]
+        return self.backend.run(u.samples, lang, self._prompt(u.channel, lang))
 
     def remember(self, channel: Channel, text: str, lang: str | None = None) -> None:
         self._ctx(channel).append((lang, text))

@@ -7,6 +7,13 @@ public struct OverlayLine: Equatable, Sendable {
     public let tStart: Double
 }
 
+/// Grey live preview of the phrase currently being spoken on one channel.
+public struct PreviewLine: Equatable, Sendable {
+    public let channel: Int
+    public let tStart: Double
+    public let text: String
+}
+
 public struct EndCard: Equatable, Sendable {
     public let sessionId: String
     public let durationS: Double
@@ -40,6 +47,13 @@ public struct OverlayState: Equatable {
     public var maxLines: Int
     public var mode: OverlayMode = .hidden
     public var lines: [OverlayLine] = []
+    public var partials: [PreviewLine] = []  // at most one per channel, mic first
+
+    /// Final lines to draw so that final + preview rows never exceed `maxLines`.
+    public var visibleLines: [OverlayLine] {
+        let room = max(1, maxLines - partials.count)
+        return Array(lines.suffix(room))
+    }
     public var recording = false
     public var sessionId: String?
     public var engineState = "disconnected"
@@ -71,6 +85,7 @@ public struct OverlayState: Equatable {
     fileprivate mutating func beginSession(_ id: String) {
         sessionId = id
         lines = []
+        partials = []
         lastSeq = -1
         answer = ""
         lastQuestion = ""
@@ -164,12 +179,22 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         if st.state == "idle" { s.recording = false }
     case let .line(l):
         s.lineArrived(l)
+    case let .partial(sid, channel, tStart, text):
+        guard sid == s.sessionId else { return [] }
+        if text.isEmpty {
+            s.partials.removeAll { $0.channel == channel && abs($0.tStart - tStart) < 0.05 }
+        } else {
+            s.partials.removeAll { $0.channel == channel }
+            s.partials.append(PreviewLine(channel: channel, tStart: tStart, text: text))
+            s.partials.sort { $0.channel < $1.channel }
+        }
     case let .answerDelta(id, text):
         if id == s.askId { s.answer += text }
     case let .answerDone(id):
         if id == s.askId { s.asking = false }
     case let .sessionStopped(sid, duration, count):
         s.recording = false
+        s.partials = []
         s.endCard = EndCard(sessionId: sid, durationS: duration, lineCount: count, confirmDiscard: false)
         s.mode = .endCard
     case let .finalizeProgress(_, stage, pct):

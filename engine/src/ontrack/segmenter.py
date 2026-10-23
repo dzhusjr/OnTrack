@@ -73,6 +73,10 @@ class Segmenter:
         u = self._emit(self._last_speech_end, keep_tail=False)
         return [u] if u is not None else []
 
+    def open_samples(self) -> np.ndarray | None:
+        """Audio of the utterance currently being collected (for live previews), or None when idle."""
+        return self._concat() if self._start is not None else None
+
     # ---- internals ----------------------------------------------------
     def _process_window(self, window: np.ndarray) -> list[Utterance]:
         is_speech = self.vad.speech_prob(window) >= self.cfg.vad_threshold

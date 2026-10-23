@@ -17,7 +17,7 @@ final class ControlMessageTests: XCTestCase {
             if case .unknown = msg { XCTFail("unknown: \(type)") }
             decoded += 1
         }
-        XCTAssertEqual(decoded, 10)
+        XCTAssertEqual(decoded, 11)
     }
 
     func testOutboundEncodingMatchesGolden() throws {

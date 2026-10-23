@@ -41,6 +41,9 @@ class Config:
     gap_marker_s: float = 10.0
     overlay_lines: int = 3
     retranscribe: bool = True
+    live_preview: bool = True  # word-by-word grey preview line in the overlay
+    preview_interval_s: float = 0.7
+    preview_min_s: float = 0.6
 
 
 def _coerce(f: dataclasses.Field, value):
