@@ -109,3 +109,20 @@ class FakeRunner:
 
     def complete(self, prompt, timeout_s):
         return "".join(self.stream(prompt, timeout_s))
+
+
+# ---- language selection ----------------------------------------------------------
+class LangAsr:
+    """Fixed language probabilities; per-language transcripts; records every run's (language, prompt)."""
+
+    def __init__(self, probs: dict, by_lang: dict):
+        self.probs, self.by_lang = probs, by_lang
+        self.calls: list[tuple[str, str | None]] = []
+
+    def detect_language(self, samples):
+        return dict(self.probs)
+
+    def run(self, samples, language, initial_prompt):
+        self.calls.append((language, initial_prompt))
+        text, logprob = self.by_lang[language]
+        return Transcript(text, language, logprob, 0.0, 1.0)

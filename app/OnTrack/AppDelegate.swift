@@ -216,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             # tau = 0.55                  # voice match threshold: higher = stricter "Me"
             # llm_model = "sonnet"        # model used for questions and summaries
             # claude_path = ""            # full path to `claude` if OnTrack can't find it
-            # allowed_langs = ["en", "ru", "uk"]
+            # allowed_langs = ["en", "uk", "ru"]   # order breaks ties (uk before ru); drop languages you never speak
             # retranscribe = true         # re-run Whisper after the session for a cleaner final transcript
 
             """

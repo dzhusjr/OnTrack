@@ -16,22 +16,36 @@ class AsrBackend(Protocol):
     def run(self, samples: np.ndarray, language: str, initial_prompt: str | None) -> Transcript: ...
 
 
+CONFIDENT = 0.8  # language-ID probability above which we decode once
+TIE_LOGPROB = 0.15  # decodes this close are a tie → earlier language in allowed_langs wins (uk before ru)
+
+
 class Transcriber:
+    """Picks the language per utterance. Forcing Whisper into the wrong language makes it *translate*,
+    so when language ID is unsure we decode in the top two languages and keep the more confident text."""
+
     def __init__(self, backend: AsrBackend, cfg: Config) -> None:
         self.backend = backend
         self.cfg = cfg
-        self._context: dict[Channel, deque[str]] = {}
+        self._context: dict[Channel, deque[tuple[str | None, str]]] = {}
 
-    def _ctx(self, channel: Channel) -> deque[str]:
-        return self._context.setdefault(channel, deque(maxlen=self.cfg.context_lines))
+    def _ctx(self, channel: Channel) -> deque[tuple[str | None, str]]:
+        return self._context.setdefault(channel, deque(maxlen=8))
+
+    def _prompt(self, channel: Channel, lang: str) -> str | None:
+        # only same-language context: a Russian prompt pushes English speech into Russian
+        same = [t for l, t in self._ctx(channel) if l is None or l == lang][-self.cfg.context_lines :]
+        return " ".join(same) if same else None
 
     def transcribe(self, u: Utterance) -> Transcript:
         probs = self.backend.detect_language(u.samples)
-        allowed = self.cfg.allowed_langs
-        lang = max(allowed, key=lambda l: (probs.get(l, 0.0), -allowed.index(l)))
-        ctx = self._ctx(u.channel)
-        prompt = " ".join(ctx) if ctx else None
-        return self.backend.run(u.samples, lang, prompt)
+        allowed = list(self.cfg.allowed_langs)
+        ranked = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))
+        candidates = ranked[:1] if probs.get(ranked[0], 0.0) >= CONFIDENT or len(ranked) < 2 else ranked[:2]
+        results = [(l, self.backend.run(u.samples, l, self._prompt(u.channel, l))) for l in candidates]
+        best_lp = max(t.avg_logprob for _, t in results)
+        close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - TIE_LOGPROB]
+        return min(close, key=lambda lt: allowed.index(lt[0]))[1]
 
-    def remember(self, channel: Channel, text: str) -> None:
-        self._ctx(channel).append(text)
+    def remember(self, channel: Channel, text: str, lang: str | None = None) -> None:
+        self._ctx(channel).append((lang, text))

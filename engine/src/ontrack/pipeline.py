@@ -153,7 +153,7 @@ class Pipeline:
         if self.echo.is_echo(speaker, u.t_start, u.t_end, text):
             return
         line = self.writer.append(speaker, u.t_start, u.t_end, t.lang, text)
-        self.transcriber.remember(u.channel, text)
+        self.transcriber.remember(u.channel, text, t.lang)
         self.echo.observe(line)
         self.latencies.append(time.perf_counter() - t0)
         if self.on_line:
