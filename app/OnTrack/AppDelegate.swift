@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.client.send(msg)
         }
         store.$state
+            .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] state in
                 guard let self else { return }

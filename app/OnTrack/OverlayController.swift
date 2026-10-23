@@ -42,13 +42,13 @@ final class OverlayController: NSObject, NSWindowDelegate {
         super.init()
         panel.delegate = self
         store.$state
+            .removeDuplicates()  // engine pings re-publish identical state every 2 s
             .receive(on: RunLoop.main)
             .sink { [weak self] state in self?.render(state) }
             .store(in: &cancellables)
     }
 
     private func render(_ state: OverlayState) {
-        NSLog("OnTrack: overlay render mode=%@", String(describing: state.mode))
         let visible = state.mode != .hidden || state.error != nil || state.toast != nil
         if !visible {
             panel.orderOut(nil)
@@ -73,7 +73,6 @@ final class OverlayController: NSObject, NSWindowDelegate {
         // Measure the SwiftUI content explicitly (fittingSize is 0×0 when the hosting view doesn't self-size).
         var size = hosting.sizeThatFits(in: NSSize(width: 560, height: 2000))
         if size.width < 100 || size.height < 20 { size = NSSize(width: 560, height: max(size.height, 64)) }
-        NSLog("OnTrack: overlay layout %.0fx%.0f", size.width, size.height)
         let top: NSPoint
         if panel.frame.height > 1, panel.isVisible {
             top = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)

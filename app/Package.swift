@@ -10,8 +10,7 @@ let package = Package(
         .executableTarget(
             name: "OnTrack",
             dependencies: [.product(name: "OnTrackCore", package: "OnTrackCore")],
-            path: "OnTrack",
-            exclude: ["Info.plist"]
+            path: "OnTrack"
         ),
     ]
 )
