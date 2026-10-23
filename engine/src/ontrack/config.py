@@ -59,12 +59,15 @@ def _coerce(f: dataclasses.Field, value):
     return value
 
 
-def load_config(path: Path | None) -> Config:
-    if path is None or not Path(path).exists():
-        return Config()
-    data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+def apply_overrides(cfg: Config, data: dict) -> Config:
     fields = {f.name: f for f in dataclasses.fields(Config)}
     unknown = sorted(set(data) - set(fields))
     if unknown:
         raise ValueError(f"Unknown config keys: {', '.join(unknown)}")
-    return Config(**{k: _coerce(fields[k], v) for k, v in data.items()})
+    return dataclasses.replace(cfg, **{k: _coerce(fields[k], v) for k, v in data.items()})
+
+
+def load_config(path: Path | None) -> Config:
+    if path is None or not Path(path).exists():
+        return Config()
+    return apply_overrides(Config(), tomllib.loads(Path(path).read_text(encoding="utf-8")))
