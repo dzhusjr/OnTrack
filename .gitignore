@@ -1,0 +1,9 @@
+sessions/
+notes/
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+build/
+DerivedData/
+xcuserdata/
