@@ -25,12 +25,36 @@ class Backends:
     embedder: Embedder
 
 
-def real_backends(cfg: Config) -> Backends:
-    from .asr_mlx import MlxWhisperBackend
-    from .embed_pyannote import PyannoteEmbedder
-    from .vad_silero import SileroVad
+class Lazy:
+    """Builds the wrapped object on first attribute access (models load only when used)."""
 
-    return Backends(SileroVad, MlxWhisperBackend(cfg.whisper_model), PyannoteEmbedder())
+    def __init__(self, factory: Callable[[], object]) -> None:
+        self._factory = factory
+        self._obj = None
+
+    def __getattr__(self, name: str):
+        if self.__dict__.get("_obj") is None:
+            self._obj = self._factory()
+        return getattr(self._obj, name)
+
+
+def real_backends(cfg: Config) -> Backends:
+    def asr():
+        from .asr_mlx import MlxWhisperBackend
+
+        return MlxWhisperBackend(cfg.whisper_model)
+
+    def embedder():
+        from .embed_pyannote import PyannoteEmbedder
+
+        return PyannoteEmbedder()
+
+    def vad():
+        from .vad_silero import SileroVad
+
+        return SileroVad()
+
+    return Backends(vad, Lazy(asr), Lazy(embedder))
 
 
 def merge_key(frame: AudioFrame) -> tuple[int, int]:
@@ -56,12 +80,13 @@ class Pipeline:
         self.labeler = SpeakerLabeler(backends.embedder, voiceprint, cfg)
         self.echo = EchoFilter(cfg)
         self.latencies: list[float] = []
-        self._origin: int | None = None
+        self._origin: int | None = writer.origin_ns  # resumed sessions keep their time origin
         self._segmenters: dict[Channel, Segmenter] = {}
 
     def process(self, frame: AudioFrame) -> None:
         if self._origin is None:
             self._origin = frame.t_ns
+            self.writer.set_origin(frame.t_ns)
         seg = self._segmenters.get(frame.channel)
         if seg is None:
             seg = Segmenter(frame.channel, self.backends.vad_factory(), self.cfg, self._origin)
@@ -71,8 +96,8 @@ class Pipeline:
 
     def finish(self) -> None:
         pending: list[Utterance] = []
-        for ch in sorted(self._segmenters, reverse=True):  # system first
-            pending += self._segmenters[ch].flush()
+        for seg in self._segmenters.values():
+            pending += seg.flush()
         for u in sorted(pending, key=lambda u: u.t_start):
             self._handle(u)
 

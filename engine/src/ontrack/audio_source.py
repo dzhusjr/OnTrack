@@ -83,13 +83,31 @@ class WavAudioSource:
         self.channel = channel
 
     def iter_frames(self) -> Iterator[AudioFrame]:
-        x = load_wav_16k(self.path)
-        pad = (-len(x)) % FRAME_SAMPLES
-        if pad:
-            x = np.concatenate([x, np.zeros(pad, np.float32)])
+        """Streams the file block by block (constant memory for multi-hour recordings)."""
+        sr = sf.info(str(self.path)).samplerate
+        rs = soxr.ResampleStream(sr, SAMPLE_RATE, 1, dtype="float32") if sr != SAMPLE_RATE else None
         step_ns = FRAME_SAMPLES * 1_000_000_000 // SAMPLE_RATE
-        for i in range(0, len(x), FRAME_SAMPLES):
-            yield AudioFrame(self.channel, (i // FRAME_SAMPLES) * step_ns, x[i : i + FRAME_SAMPLES].copy())
+        carry = np.zeros(0, np.float32)
+        idx = 0
+        blocks = sf.blocks(str(self.path), blocksize=sr, dtype="float32", always_2d=True)
+        for block in blocks:
+            mono = block.mean(axis=1).astype(np.float32)
+            if rs is not None:
+                mono = rs.resample_chunk(mono, last=False)
+            carry = np.concatenate([carry, mono])
+            while len(carry) >= FRAME_SAMPLES:
+                yield AudioFrame(self.channel, idx * step_ns, carry[:FRAME_SAMPLES].copy())
+                carry = carry[FRAME_SAMPLES:]
+                idx += 1
+        if rs is not None:
+            carry = np.concatenate([carry, rs.resample_chunk(np.zeros(0, np.float32), last=True)])
+        while len(carry) > 0:
+            chunk = carry[:FRAME_SAMPLES]
+            if len(chunk) < FRAME_SAMPLES:
+                chunk = np.concatenate([chunk, np.zeros(FRAME_SAMPLES - len(chunk), np.float32)])
+            yield AudioFrame(self.channel, idx * step_ns, chunk)
+            carry = carry[FRAME_SAMPLES:]
+            idx += 1
 
 
 class SocketAudioSource:

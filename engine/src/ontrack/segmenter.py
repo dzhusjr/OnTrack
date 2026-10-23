@@ -20,6 +20,7 @@ class Segmenter:
         self._max = int(cfg.max_utt_s * SAMPLE_RATE)
         self._search = int(cfg.split_search_s * SAMPLE_RATE)
         self._split_win = cfg.split_window_ms * SAMPLE_RATE // 1000
+        self._tol = SAMPLE_RATE // 10  # 100 ms timestamp jitter tolerance before treating as gap/stale
 
         self._pos: int | None = None  # absolute sample index of next unprocessed sample
         self._pending = np.zeros(0, np.float32)  # samples not yet forming a full VAD window
@@ -32,10 +33,19 @@ class Segmenter:
 
     # ---- public API ---------------------------------------------------
     def push(self, frame: AudioFrame) -> list[Utterance]:
-        if self._pos is None:
-            self._pos = round((frame.t_ns - self.origin_ns) * SAMPLE_RATE / 1e9)
-        self._pending = np.concatenate([self._pending, frame.samples.astype(np.float32)])
+        frame_pos = round((frame.t_ns - self.origin_ns) * SAMPLE_RATE / 1e9)
         out: list[Utterance] = []
+        if self._pos is None:
+            self._pos = frame_pos
+        else:
+            expected = self._pos + len(self._pending)
+            if frame_pos < expected - self._tol:
+                return out  # stale or duplicate frame
+            if frame_pos > expected + self._tol:
+                out += self.flush()  # capture gap: close the open utterance
+                self._pos = frame_pos
+                self._ring = np.zeros(0, np.float32)
+        self._pending = np.concatenate([self._pending, frame.samples.astype(np.float32)])
         while len(self._pending) >= self._win:
             window, self._pending = self._pending[: self._win], self._pending[self._win :]
             out += self._process_window(window)
@@ -50,7 +60,8 @@ class Segmenter:
             if self.vad.speech_prob(np.pad(self._pending, (0, self._win - len(self._pending)))) >= self.cfg.vad_threshold:
                 self._last_speech_end = self._buf_len
             self._pending = np.zeros(0, np.float32)
-        return [self._emit(self._last_speech_end, keep_tail=False)]
+        u = self._emit(self._last_speech_end, keep_tail=False)
+        return [u] if u is not None else []
 
     # ---- internals ----------------------------------------------------
     def _process_window(self, window: np.ndarray) -> list[Utterance]:
@@ -80,10 +91,14 @@ class Segmenter:
 
         if self._silence_run >= self._end_silence:
             trailing = self._concat()[self._last_speech_end :]
-            out.append(self._emit(self._last_speech_end, keep_tail=False))
+            u = self._emit(self._last_speech_end, keep_tail=False)
+            if u is not None:
+                out.append(u)
             self._ring = trailing[-self._pre_pad :]
         elif self._buf_len >= self._max:
-            out.append(self._emit(self._quiet_cut(), keep_tail=True))
+            u = self._emit(self._quiet_cut(), keep_tail=True)
+            if u is not None:
+                out.append(u)
         return out
 
     def _append(self, x: np.ndarray) -> None:
@@ -104,9 +119,14 @@ class Segmenter:
                 best, best_rms = s + self._split_win // 2, rms
         return best
 
-    def _emit(self, cut: int, keep_tail: bool) -> Utterance:
+    def _emit(self, cut: int, keep_tail: bool) -> Utterance | None:
         data = self._concat()
         start = self._start
+        if cut <= 0:  # nothing but non-speech left after a split: close without emitting
+            self._buf, self._buf_len, self._start = [], 0, None
+            self._last_speech_end = 0
+            self._silence_run = 0
+            return None
         utt = Utterance(
             self.channel,
             start / SAMPLE_RATE,

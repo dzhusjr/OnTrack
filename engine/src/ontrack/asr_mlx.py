@@ -35,6 +35,7 @@ class MlxWhisperBackend:
             language=language,
             initial_prompt=initial_prompt,
             condition_on_previous_text=False,
+            temperature=0.0,  # no fallback re-decodes: bounded latency; hallucination filter rejects bad decodes
             word_timestamps=False,
             verbose=None,
         )

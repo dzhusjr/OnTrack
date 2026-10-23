@@ -94,3 +94,16 @@ def test_socket_source_reads_until_eof():
     threading.Thread(target=client, daemon=True).start()
     got = list(src.iter_frames())
     assert [f.t_ns for f in got] == [0, 20_000_000, 40_000_000]
+
+
+def test_wav_source_streams_without_reading_whole_file(tmp_path, monkeypatch):  # review #3
+    p = tmp_path / "long.wav"
+    sf.write(p, np.zeros((48000 * 3, 2), np.float32), 48000)
+
+    def boom(*a, **k):
+        raise AssertionError("sf.read loads the whole file")
+
+    monkeypatch.setattr(sf, "read", boom)
+    frames = list(WavAudioSource(p, Channel.MIC).iter_frames())
+    assert abs(len(frames) - 150) <= 1
+    assert all(len(f.samples) == 320 for f in frames)

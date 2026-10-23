@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 import numpy as np
 from fakes import ME_VP, NOW, EnergyVad, FakeAsr, FakeEmbedder, frames, silence, tone, tr
 
@@ -69,3 +71,34 @@ def test_text_is_stripped(tmp_path):
         p.process(f)
     p.finish()
     assert read_lines(w.dir)[0].text == "padded text"
+
+
+def test_lazy_defers_construction_until_first_use():  # review #4
+    from ontrack.pipeline import Lazy
+
+    built = []
+
+    class Thing:
+        def embed(self, x):
+            return "ok"
+
+    lz = Lazy(lambda: built.append(1) or Thing())
+    assert built == []
+    assert lz.embed(None) == "ok" and lz.embed(None) == "ok"
+    assert built == [1]
+
+
+def test_resumed_session_keeps_original_time_origin(tmp_path):  # review #7
+    cfg = replace(load_config(None), sessions_dir=tmp_path)
+    w = SessionWriter.start(tmp_path, "T", NOW)
+    p = Pipeline(cfg, Backends(EnergyVad, FakeAsr([({"en": 1}, tr("a"))]), FakeEmbedder()), w, None)
+    for f in frames(np.concatenate([tone(1.5), silence(1.0)]), Channel.MIC, start_ns=5_000_000_000):
+        p.process(f)
+    p.finish()
+    r = SessionWriter.resume(w.dir)
+    assert r.origin_ns == 5_000_000_000
+    p2 = Pipeline(cfg, Backends(EnergyVad, FakeAsr([({"en": 1}, tr("b"))]), FakeEmbedder()), r, None)
+    for f in frames(np.concatenate([tone(1.5), silence(1.0)]), Channel.MIC, start_ns=65_000_000_000):
+        p2.process(f)
+    p2.finish()
+    assert read_lines(w.dir)[-1].t_start == pytest.approx(60.0, abs=0.25)

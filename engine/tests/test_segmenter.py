@@ -60,3 +60,37 @@ def test_origin_offsets_timestamps():
         out += seg.push(f)
     assert len(out) == 1 and out[0].t_start == pytest.approx(2.0, abs=0.04)
     assert out[0].channel == Channel.SYSTEM
+
+
+@pytest.mark.parametrize("speech_s", [14.6, 14.7, 14.8, 14.9])
+def test_split_inside_pause_never_emits_empty_utterance(speech_s):  # review #1
+    out, seg = run(np.concatenate([tone(speech_s), silence(2.0)]))
+    out += seg.flush()
+    assert out and all(len(u.samples) > 0 and u.t_end > u.t_start for u in out)
+
+
+def test_flush_after_split_in_pause_never_empty():  # review #1
+    out, seg = run(np.concatenate([tone(14.7), silence(0.4)]))
+    out += seg.flush()
+    assert all(len(u.samples) > 0 for u in out)
+
+
+def test_gap_in_frames_keeps_timestamps_and_closes_utterance():  # review #5
+    seg = Segmenter(Channel.MIC, EnergyVad(), load_config(None), origin_ns=0)
+    out = []
+    for f in frames(tone(1.0), Channel.MIC):
+        out += seg.push(f)
+    for f in frames(np.concatenate([tone(1.0), silence(1.0)]), Channel.MIC, start_ns=10_000_000_000):
+        out += seg.push(f)
+    assert len(out) == 2
+    assert out[0].t_end <= 1.05
+    assert out[1].t_start == pytest.approx(10.0, abs=0.05)
+
+
+def test_stale_frame_is_dropped():  # review #5
+    seg = Segmenter(Channel.MIC, EnergyVad(), load_config(None), origin_ns=0)
+    fs = frames(np.concatenate([tone(1.0), silence(1.0)]), Channel.MIC)
+    out = []
+    for f in fs[:30] + fs[0:15] + fs[30:]:  # 300 ms of stale/duplicate frames replayed
+        out += seg.push(f)
+    assert len(out) == 1 and len(out[0].samples) <= 1.0 * 16000 + 512 + 1600  # ≤100 ms jitter tolerance

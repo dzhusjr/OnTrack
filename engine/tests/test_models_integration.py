@@ -13,9 +13,9 @@ from ontrack.config import load_config
 from ontrack.pipeline import Pipeline, real_backends
 from ontrack.segmenter import Segmenter
 from ontrack.session import SessionWriter, read_lines
-from ontrack.speaker import load_voiceprint
+from ontrack.speaker import enroll, load_voiceprint
 from ontrack.transcriber import Transcriber
-from ontrack.types import Channel, Utterance
+from ontrack.types import AudioFrame, Channel, Utterance
 
 pytestmark = pytest.mark.models
 FX = Path(__file__).parent / "fixtures"
@@ -58,9 +58,10 @@ def test_me_vs_other_accuracy(backends, tmp_path):
 
 
 def test_latency_budget(backends, tmp_path):
-    cfg = replace(load_config(None), sessions_dir=tmp_path)
+    cfg = replace(load_config(None), sessions_dir=tmp_path, app_support_dir=tmp_path / "support")
+    enroll(backends.embedder, load_wav_16k(FX / "enroll_daniel.wav"), cfg.app_support_dir / "voiceprint.npy")
+    vp = load_voiceprint(cfg.app_support_dir / "voiceprint.npy")  # embeddings are part of the measured cost
     w = SessionWriter.start(tmp_path, "lat", datetime.now())
-    vp = load_voiceprint(cfg.app_support_dir / "voiceprint.npy")
     p = Pipeline(cfg, backends, w, vp)
     for f in WavAudioSource(FX / "dialog.wav", Channel.MIC).iter_frames():
         p.process(f)
@@ -75,3 +76,19 @@ def test_silero_silence(backends):
     for i in range(500):  # 10 s
         out += seg.push(AudioFrame(Channel.MIC, i * 20_000_000, np.zeros(320, np.float32)))
     assert out == [] and seg.flush() == []
+
+
+def test_room_noise_produces_no_lines(backends, tmp_path):
+    """Pink-ish noise + 50 Hz hum (~ventilation) for 20 s must not produce transcript lines."""
+    rng = np.random.default_rng(0)
+    white = rng.standard_normal(20 * 16000).astype(np.float32)
+    pink = np.cumsum(white) / 400.0
+    pink = (pink - np.convolve(pink, np.ones(1600) / 1600, mode="same")).astype(np.float32)
+    t = np.arange(20 * 16000) / 16000
+    x = (0.02 * pink / (np.abs(pink).max() or 1) + 0.01 * np.sin(2 * np.pi * 50 * t)).astype(np.float32)
+    w = SessionWriter.start(tmp_path, "noise", datetime.now())
+    p = Pipeline(replace(load_config(None), sessions_dir=tmp_path), backends, w, None)
+    for i in range(0, len(x), 320):
+        p.process(AudioFrame(Channel.MIC, i * 62_500, x[i : i + 320]))
+    p.finish()
+    assert read_lines(w.dir) == []

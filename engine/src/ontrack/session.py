@@ -78,6 +78,14 @@ class SessionWriter:
         return self._dir.name
 
     @property
+    def origin_ns(self) -> int | None:
+        return self._meta.get("origin_ns")
+
+    def set_origin(self, origin_ns: int) -> None:
+        self._meta["origin_ns"] = origin_ns
+        _write_atomic(self._dir / "meta.json", json.dumps(self._meta, ensure_ascii=False, indent=2))
+
+    @property
     def next_seq(self) -> int:
         return self._next_seq
 
