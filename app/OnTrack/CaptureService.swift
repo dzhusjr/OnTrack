@@ -19,6 +19,9 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
     private var micChunker = FrameChunker()
     private let micLock = NSLock()
     private var configObserver: NSObjectProtocol?
+    private var silentMicFrames = 0
+    private var voiceProcessingOn = false
+    private var silenceReported = false
     private var ignoreConfigChangesUntil = Date.distantPast
 
     private var stream: SCStream?
@@ -53,13 +56,19 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
 
     // MARK: microphone
 
-    private func startMic() {
+    private func startMic(voiceProcessing: Bool? = nil) {
+        if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            report("Microphone access is off — allow OnTrack in System Settings → Privacy & Security → Microphone, then restart OnTrack.")
+        }
         engine = AVAudioEngine()
         let input = engine.inputNode
         ignoreConfigChangesUntil = Date().addingTimeInterval(1.5)  // enabling voice processing itself posts a change
-        if echoCancellation {
+        voiceProcessingOn = false
+        silentMicFrames = 0
+        if voiceProcessing ?? echoCancellation {
             do {
                 try input.setVoiceProcessingEnabled(true)
+                voiceProcessingOn = true
                 // Don't turn down Zoom/Meet/music while we listen.
                 input.voiceProcessingOtherAudioDuckingConfiguration =
                     AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
@@ -72,7 +81,11 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
             report("No microphone input available.")
             return
         }
-        micResampler = Resampler16k(from: format)
+        // Voice processing is an I/O unit: the output side must be part of the running graph,
+        // otherwise macOS delivers all-zero input buffers.
+        let mixer = engine.mainMixerNode
+        mixer.outputVolume = 0
+        micResampler = Resampler16k(from: Resampler16k.firstChannelFormat(of: format))
         micLock.lock()
         micChunker.reset()
         micLock.unlock()
@@ -103,13 +116,38 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private func handleMic(_ buffer: AVAudioPCMBuffer, _ time: AVAudioTime) {
-        guard let resampler = micResampler else { return }
-        let samples = resampler.convert(buffer)
+        guard let resampler = micResampler, let mono = Resampler16k.firstChannel(of: buffer) else { return }
+        let samples = resampler.convert(mono)
+        checkSilence(samples)
         let host = time.isHostTimeValid ? Self.ns(hostTime: time.hostTime) : Self.nowNs()
         micLock.lock()
         let frames = micChunker.append(samples, hostTimeNs: host)
         micLock.unlock()
         for f in frames { onFrame?(.mic, f.tNs, f.samples) }
+    }
+
+    /// All-zero mic input for 3 s means the capture path is broken (not a quiet room, which still has noise).
+    private func checkSilence(_ samples: [Float]) {
+        guard !samples.isEmpty else { return }
+        if samples.contains(where: { $0 != 0 }) {
+            silentMicFrames = 0
+            return
+        }
+        silentMicFrames += samples.count
+        guard silentMicFrames > 3 * 16_000 else { return }
+        silentMicFrames = 0
+        if voiceProcessingOn {
+            NSLog("OnTrack: mic delivers digital silence with voice processing — restarting without echo cancellation")
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isRunning else { return }
+                self.stopMic()
+                self.startMic(voiceProcessing: false)
+                self.report("Echo cancellation was turned off: this Mac's mic returned silence with it on. Use headphones on calls.")
+            }
+        } else if !silenceReported {
+            silenceReported = true
+            report("The microphone is delivering silence. Check System Settings → Privacy & Security → Microphone (OnTrack on) and Sound → Input.")
+        }
     }
 
     // MARK: system audio
