@@ -13,3 +13,4 @@ app/OnTrack/Info.plist
 app/build/
 app/OnTrackCore/.build/
 app/OnTrackCore/.swiftpm/
+app/.build/

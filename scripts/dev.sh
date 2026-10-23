@@ -3,13 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "✗ Missing '$1' — $2"; exit 1; }; }
-need_xcode() {
-  if xcode-select -p 2>/dev/null | grep -q CommandLineTools; then
-    echo "✗ The active developer directory is the Command Line Tools (no XCTest, no xcodebuild). Run:"
-    echo "    sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
-    exit 1
-  fi
-}
+has_xcode() { ! xcode-select -p 2>/dev/null | grep -q CommandLineTools && command -v xcodebuild >/dev/null 2>&1; }
 
 setup() {
   need uv "brew install uv"
@@ -24,21 +18,52 @@ setup() {
 
 test_all() {
   (cd "$ROOT/engine" && uv run pytest -q)
-  need_xcode
-  (cd "$ROOT/app/OnTrackCore" && swift test)
+  if has_xcode; then
+    (cd "$ROOT/app/OnTrackCore" && swift test)
+  else
+    echo "• Skipping Swift core tests (XCTest needs full Xcode; they run in CI). Building still works."
+    (cd "$ROOT/app/OnTrackCore" && swift build -q)
+  fi
 }
 
 app() {
-  need xcodegen "brew install xcodegen"
-  need xcodebuild "install Xcode"
-  need_xcode
   cd "$ROOT/app"
-  xcodegen generate --quiet
-  xcodebuild -project OnTrack.xcodeproj -scheme OnTrack -configuration Release \
-             -derivedDataPath build -quiet build
   mkdir -p ~/Applications
-  rm -rf ~/Applications/OnTrack.app
-  cp -R build/Build/Products/Release/OnTrack.app ~/Applications/
+  if has_xcode && command -v xcodegen >/dev/null 2>&1; then
+    xcodegen generate --quiet
+    xcodebuild -project OnTrack.xcodeproj -scheme OnTrack -configuration Release \
+               -derivedDataPath build -quiet build
+    rm -rf ~/Applications/OnTrack.app
+    cp -R build/Build/Products/Release/OnTrack.app ~/Applications/
+  else
+    # Command Line Tools only: build with SwiftPM and assemble the .app bundle ourselves.
+    swift build -c release --product OnTrack
+    local bin app
+    bin="$(swift build -c release --show-bin-path)/OnTrack"
+    app=~/Applications/OnTrack.app
+    rm -rf "$app"
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+    cp "$bin" "$app/Contents/MacOS/OnTrack"
+    cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.romandzhus.ontrack</string>
+  <key>CFBundleName</key><string>OnTrack</string>
+  <key>CFBundleDisplayName</key><string>OnTrack</string>
+  <key>CFBundleExecutable</key><string>OnTrack</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>OnTrack transcribes lectures, meetings and calls locally on this Mac.</string>
+</dict>
+</plist>
+PLIST
+    codesign --force --sign - "$app"
+  fi
   echo "✓ installed ~/Applications/OnTrack.app"
 }
 
