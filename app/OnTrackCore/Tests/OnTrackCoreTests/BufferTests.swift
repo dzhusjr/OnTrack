@@ -24,3 +24,22 @@ final class BufferTests: XCTestCase {
         XCTAssertEqual(r.count, 100)
     }
 }
+
+final class AudioGateTests: XCTestCase {  // review M2 #1
+    func testFramesHeldUntilSessionConfirmedThenReleasedInOrder() {
+        var g = AudioGate()
+        g.hold()
+        XCTAssertNil(g.offer(Data([1]), channel: .mic, connected: true))
+        XCTAssertNil(g.offer(Data([2]), channel: .system, connected: true))
+        XCTAssertEqual(g.release(), [Data([1]), Data([2])])
+        XCTAssertEqual(g.offer(Data([3]), channel: .mic, connected: true), Data([3]))
+    }
+
+    func testDisconnectedFramesBufferedAndKeptUntilRelease() {
+        var g = AudioGate()
+        XCTAssertNil(g.offer(Data([1]), channel: .mic, connected: false))
+        g.hold()  // reconnected, waiting for the engine to resume the session
+        XCTAssertNil(g.offer(Data([2]), channel: .mic, connected: true))
+        XCTAssertEqual(g.release(), [Data([1]), Data([2])])
+    }
+}

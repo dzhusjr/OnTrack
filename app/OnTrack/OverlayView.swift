@@ -46,7 +46,7 @@ struct OverlayView: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
                 if s.lines.isEmpty {
-                    Text(s.modelReady ? "Listening…" : "Loading speech model…")
+                    Text(!s.modelReady ? "Loading speech model…" : (s.recording ? "Listening…" : "Not recording — ⌥⇧S to start"))
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
                 ForEach(Array(s.lines.enumerated()), id: \.element.seq) { index, line in
@@ -106,13 +106,12 @@ struct OverlayView: View {
                 Text(s.lastQuestion).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
             }
             if !s.answer.isEmpty {
-                ScrollView {
-                    Text(LocalizedStringKey(s.answer))  // renders Markdown
-                        .font(.system(size: 13))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 8 * 18)
+                Text(LocalizedStringKey(s.answer))  // renders Markdown
+                    .font(.system(size: 13))
+                    .textSelection(.enabled)
+                    .lineLimit(12)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .onAppear { questionFocused = true }

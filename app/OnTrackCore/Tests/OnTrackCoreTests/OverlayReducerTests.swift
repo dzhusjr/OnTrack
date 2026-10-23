@@ -110,3 +110,29 @@ final class OverlayReducerTests: XCTestCase {
         XCTAssertEqual(s.lines.map(\.text), ["new"])
     }
 }
+
+final class OverlayReducerReviewTests: XCTestCase {
+    private func recording(_ s: inout OverlayState, _ id: String) {
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: id, degraded: false))))
+    }
+
+    func testDisconnectWhileFinalizingReturnsToEndCardWithError() {  // review M2 #7
+        var s = OverlayState()
+        recording(&s, "s1")
+        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 60, lineCount: 3)))
+        reduce(&s, .choose(.saveAll))
+        XCTAssertEqual(s.mode, .finalizing)
+        reduce(&s, .disconnected)
+        XCTAssertEqual(s.mode, .endCard)
+        XCTAssertNotNil(s.error)
+        XCTAssertEqual(reduce(&s, .choose(.saveAll)), [.finalize(sessionId: "s1", action: .saveAll)])  // retry possible
+    }
+
+    func testPreviousSessionSavedWhileRecordingNextKeepsLiveView() {  // review M2 #6
+        var s = OverlayState()
+        recording(&s, "s2")
+        reduce(&s, .engine(.finalizeDone(sessionId: "s1", notesPath: "/notes/s1")))
+        XCTAssertEqual(s.mode, .collapsed)
+        XCTAssertEqual(s.toast, "Previous session saved to notes")
+    }
+}

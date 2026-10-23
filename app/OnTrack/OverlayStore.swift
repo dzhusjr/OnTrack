@@ -16,9 +16,13 @@ final class OverlayStore: ObservableObject {
         state = OverlayState(maxLines: maxLines)
     }
 
+    private var toastClear: DispatchWorkItem?
+
     func send(_ event: OverlayEvent) {
         let wasRecording = state.recording
+        let oldToast = state.toast
         let commands = reduce(&state, event)
+        if state.toast != oldToast, state.toast != nil { scheduleToastClear() }
         if state.recording && !wasRecording && recordingStarted == nil { recordingStarted = Date() }
         if !state.recording && wasRecording { recordingStarted = nil }
         commands.forEach { sendToEngine?($0) }
@@ -36,5 +40,18 @@ final class OverlayStore: ObservableObject {
 
     func showToast(_ text: String) {
         state.toast = text
+        scheduleToastClear()
+    }
+
+    private func scheduleToastClear() {
+        toastClear?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            var s = self.state
+            s.toast = nil
+            self.state = s
+        }
+        toastClear = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: item)
     }
 }

@@ -14,6 +14,8 @@ final class EngineSupervisor {
     private var lastLaunch = Date.distantPast
     private var missedPings = 0
     private var timer: Timer?
+    private var unreachableSince: Date?
+    private lazy var loginPath: String? = Self.loginShellPath()
 
     init(engineDir: URL, logDir: URL) {
         self.engineDir = engineDir
@@ -42,7 +44,21 @@ final class EngineSupervisor {
     func startHealthChecks(client: EngineClient) {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self, weak client] _ in
-            guard let self, let client, client.isConnected else { return }
+            guard let self, let client else { return }
+            guard client.isConnected else {
+                // Running but not accepting connections (e.g. its sockets were removed) → restart after 10 s.
+                if let p = self.process, p.isRunning, Date().timeIntervalSince(self.lastLaunch) > 10 {
+                    let since = self.unreachableSince ?? Date()
+                    self.unreachableSince = since
+                    if Date().timeIntervalSince(since) > 10 {
+                        NSLog("OnTrack: engine unreachable — restarting")
+                        self.unreachableSince = nil
+                        self.restart()
+                    }
+                }
+                return
+            }
+            self.unreachableSince = nil
             self.missedPings += 1
             if self.missedPings > 3 {
                 NSLog("OnTrack: engine unresponsive — restarting")
@@ -64,12 +80,46 @@ final class EngineSupervisor {
         // terminationHandler relaunches
     }
 
+    /// Stop engines left over from a previous app run and wait until they are gone,
+    /// so their shutdown can't interfere with the new engine.
     private func killStaleEngines() {
-        let pk = Process()
-        pk.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        pk.arguments = ["-f", "bin/ontrack-engine"]
-        try? pk.run()
-        pk.waitUntilExit()
+        func run(_ tool: String, _ args: [String]) -> Int32 {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: tool)
+            p.arguments = args
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            guard (try? p.run()) != nil else { return -1 }
+            p.waitUntilExit()
+            return p.terminationStatus
+        }
+        guard run("/usr/bin/pgrep", ["-f", "bin/ontrack-engine"]) == 0 else { return }
+        _ = run("/usr/bin/pkill", ["-f", "bin/ontrack-engine"])
+        for _ in 0..<50 {  // up to 5 s for a graceful stop
+            if run("/usr/bin/pgrep", ["-f", "bin/ontrack-engine"]) != 0 { return }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        _ = run("/usr/bin/pkill", ["-9", "-f", "bin/ontrack-engine"])
+    }
+
+    /// The PATH a Terminal would have (nvm/fnm/volta node for the `claude` CLI); apps launched from Finder get a minimal one.
+    private static func loginShellPath() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = ["-lc", "printf %s \"$PATH\""]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let deadline = Date().addingTimeInterval(3)
+        while p.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if p.isRunning {
+            p.terminate()
+            return nil
+        }
+        let path = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return path.isEmpty ? nil : path
     }
 
     private func launch() {
@@ -92,7 +142,7 @@ final class EngineSupervisor {
         var env = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let extra = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "\(home)/.claude/local"]
-        env["PATH"] = ([env["PATH"] ?? "/usr/bin:/bin"] + extra).joined(separator: ":")
+        env["PATH"] = ([loginPath ?? env["PATH"] ?? "/usr/bin:/bin"] + extra).joined(separator: ":")
         env["PYTHONUNBUFFERED"] = "1"
         p.environment = env
         if let log {

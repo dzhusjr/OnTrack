@@ -15,7 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlay: OverlayController!
     private var cancellables: Set<AnyCancellable> = []
     private var enrolling = false
-    private var lastSavedSessionId: String?
+    private var resumeSessionId: String?  // set while waiting for a restarted engine to resume our session
+    private var lastFinalizeSessionId: String?
+    private var pendingSummarySessionId: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: settings.appSupportDir, withIntermediateDirectories: true)
@@ -35,21 +37,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             quit: { NSApp.terminate(nil) }
         ))
 
-        store.sendToEngine = { [weak self] in self?.client.send($0) }
+        store.sendToEngine = { [weak self] msg in
+            if case let .finalize(sid, _) = msg { self?.lastFinalizeSessionId = sid }
+            self?.client.send(msg)
+        }
         store.$state
             .receive(on: RunLoop.main)
             .sink { [weak self] state in
                 guard let self else { return }
                 self.menu.update(state: state, sessionName: self.store.sessionName,
-                                 canRetrySummary: self.lastSavedSessionId != nil && !state.recording)
+                                 canRetrySummary: self.pendingSummarySessionId != nil)
             }
             .store(in: &cancellables)
 
         client.onMessage = { [weak self] msg in self?.handle(msg) }
         client.onConnectionChange = { [weak self] up in self?.connectionChanged(up) }
         capture.echoCancellation = settings.echoCancellation
-        capture.onFrame = { [weak self] channel, t, samples in
-            self?.client.sendAudio(channel: channel, tNs: t, samples: samples)
+        let client = self.client  // called on audio threads: don't touch main-actor state
+        capture.onFrame = { channel, t, samples in
+            client.sendAudio(channel: channel, tNs: t, samples: samples)
         }
         capture.onIssue = { [weak self] text in
             if text == "[audio source changed]" { return }
@@ -91,14 +97,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handle(_ msg: Inbound) {
         switch msg {
-        case .pong, .status:
+        case .pong:
             supervisor.noteAlive()
+        case let .status(st):
+            supervisor.noteAlive()
+            if let sid = resumeSessionId {
+                if st.state == "recording", st.sessionId == sid {
+                    resumeSessionId = nil
+                    client.releaseAudio()
+                } else {
+                    return  // fresh engine still idle: don't let it end our session in the UI
+                }
+            } else if st.state == "recording" || st.state == "enrolling" {
+                client.releaseAudio()
+            }
         case .enrollDone:
             finishEnrollment()
-        case let .error(err) where enrolling && err.code == "enroll_failed":
-            finishEnrollment()
-        case let .finalizeDone(sid, path):
-            if !path.isEmpty { lastSavedSessionId = sid }
+        case let .error(err):
+            if enrolling && err.code == "enroll_failed" { finishEnrollment() }
+            if err.code == "summary_failed" { pendingSummarySessionId = lastFinalizeSessionId }
+        case let .finalizeDone(sid, _):
+            if sid == pendingSummarySessionId { pendingSummarySessionId = nil }
         default:
             break
         }
@@ -107,9 +126,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func connectionChanged(_ up: Bool) {
         if up {
-            // Engine restarted mid-session → resume the same session (spec §8).
+            // Engine restarted mid-session → resume the same session (spec §8). Audio stays buffered until confirmed.
             if store.state.recording, let sid = store.state.sessionId {
+                resumeSessionId = sid
                 client.send(.startSession(name: store.sessionName ?? "Session", sessionId: sid))
+            } else if enrolling {
+                client.send(.enrollStart)
             }
         } else {
             store.send(.disconnected)
@@ -124,9 +146,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.capture.stop() }
             return
         }
-        guard store.state.engineState == "idle" else {
+        guard ["idle", "postprocessing"].contains(store.state.engineState) else {
             store.showIssue("The engine is \(store.state.engineState) — try again in a moment.")
             return
+        }
+        // Starting the next lecture while the previous end card is open: save the previous one (the default action).
+        if let card = store.state.endCard, store.state.mode == .endCard || store.state.mode == .done {
+            if store.state.mode == .endCard { client.send(.finalize(sessionId: card.sessionId, action: .saveAll)) }
+            lastFinalizeSessionId = card.sessionId
+            store.send(.dismiss)
         }
         let fallback = "Session \(Self.timeFormatter.string(from: Date()))"
         let name: String
@@ -137,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name = fallback
         }
         store.sessionName = name
+        client.holdAudio()  // released when the engine reports status=recording
         client.send(.startSession(name: name, sessionId: nil))
         capture.start()
     }
@@ -151,8 +180,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         enrolling = true
         store.showToast("Listening — keep talking for 30 seconds…")
+        client.holdAudio()
         client.send(.enrollStart)
         capture.start(micOnly: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in  // engine never answered
+            guard let self, self.enrolling else { return }
+            self.finishEnrollment()
+            self.store.showIssue("Enrollment timed out — is the engine running? (menu → Open Logs)")
+        }
     }
 
     private func finishEnrollment() {
@@ -161,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func retrySummary() {
-        guard let sid = lastSavedSessionId else { return }
+        guard let sid = pendingSummarySessionId else { return }
         client.send(.retrySummary(sessionId: sid))
         store.showToast("Retrying summary…")
     }

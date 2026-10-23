@@ -140,6 +140,11 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.toast = nil
     case .disconnected:
         s.engineState = "disconnected"
+        if s.mode == .finalizing {  // engine went away mid-save: let the user retry (saving is idempotent)
+            s.mode = .endCard
+            s.progress = nil
+            s.error = "The engine restarted while saving — choose again to retry."
+        }
     }
     return []
 }
@@ -169,7 +174,11 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         s.mode = .endCard
     case let .finalizeProgress(_, stage, pct):
         s.progress = FinalizeProgress(stage: stage, pct: pct)
-    case let .finalizeDone(_, path):
+    case let .finalizeDone(sid, path):
+        if s.recording, sid != s.sessionId {  // previous session finished saving while a new one records
+            if !path.isEmpty { s.toast = "Previous session saved to notes" }
+            return []
+        }
         s.notesPath = path.isEmpty ? nil : path
         s.progress = nil
         s.mode = path.isEmpty ? (s.recording ? .collapsed : .hidden) : .done

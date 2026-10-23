@@ -12,7 +12,7 @@ final class EngineClient {
     private let queue = DispatchQueue(label: "ontrack.engine-client")
     private var control: UnixSocket?
     private var audio: UnixSocket?
-    private var ring = AudioRingBuffer(maxSeconds: 10)
+    private var gate = AudioGate(maxSeconds: 10)
     private var backoff = Backoff()
     private var running = false
     private var connectScheduled = false
@@ -53,8 +53,26 @@ final class EngineClient {
     func sendAudio(channel: AudioChannel, tNs: UInt64, samples: [Float]) {
         let data = FrameEncoder.encode(channel: channel, tNs: tNs, samples: samples)
         queue.async {
-            if let a = self.audio, a.writeAll(data) { return }
-            self.ring.append(data, channel: channel)
+            guard let now = self.gate.offer(data, channel: channel, connected: self.audio != nil) else { return }
+            if let a = self.audio, a.writeAll(now) { return }
+            self.gate.requeue(now, channel: channel)
+        }
+    }
+
+    /// Buffer audio (≤ 10 s) until `releaseAudio()` — used until the engine confirms the session is recording.
+    func holdAudio() {
+        queue.async { self.gate.hold() }
+    }
+
+    /// Engine is recording: send buffered audio, then stream live.
+    func releaseAudio() {
+        queue.async {
+            let frames = self.gate.release()
+            guard let a = self.audio else {
+                frames.forEach { self.gate.requeue($0, channel: .mic) }
+                return
+            }
+            for f in frames where !a.writeAll(f) { break }
         }
     }
 
@@ -71,12 +89,13 @@ final class EngineClient {
         control = c
         audio = a
         backoff.reset()
-        for frame in ring.drain() { _ = a.writeAll(frame) }
-        startReader(c)
+        gate.hold()  // a fresh engine is idle: keep buffered audio until it confirms the session
+        // Queue the connection callback BEFORE starting the reader so it runs before any engine message.
         DispatchQueue.main.async {
             self.isConnected = true
             self.onConnectionChange?(true)
         }
+        startReader(c)
     }
 
     private func scheduleReconnect() {

@@ -37,6 +37,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
     init(store: OverlayStore, onOpenNotes: @escaping (String) -> Void, onOpenSettings: @escaping (String) -> Void) {
         self.store = store
         hosting = NSHostingView(rootView: OverlayView(store: store, onOpenNotes: onOpenNotes, onOpenSettings: onOpenSettings))
+        hosting.sizingOptions = []  // the controller sizes the panel (top edge fixed); avoid fighting it
         panel = OverlayPanel(contentView: hosting)
         super.init()
         panel.delegate = self
