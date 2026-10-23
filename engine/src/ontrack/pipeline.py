@@ -71,6 +71,7 @@ class Pipeline:
         writer: SessionWriter,
         voiceprint: np.ndarray | None,
         on_line: Callable[[Line], None] | None = None,
+        fallback_asr: AsrBackend | None = None,
     ) -> None:
         self.cfg = cfg
         self.backends = backends
@@ -80,6 +81,9 @@ class Pipeline:
         self.labeler = SpeakerLabeler(backends.embedder, voiceprint, cfg)
         self.echo = EchoFilter(cfg)
         self.latencies: list[float] = []
+        self._fallback_asr = fallback_asr
+        self._degraded = False
+        self._held: list[Utterance] = []  # mic utterances waiting for overlapping system audio
         self._origin: int | None = writer.origin_ns  # resumed sessions keep their time origin
         self._segmenters: dict[Channel, Segmenter] = {}
 
@@ -92,14 +96,48 @@ class Pipeline:
             seg = Segmenter(frame.channel, self.backends.vad_factory(), self.cfg, self._origin)
             self._segmenters[frame.channel] = seg
         for u in seg.push(frame):
-            self._handle(u)
+            if u.channel == Channel.MIC:
+                self._held.append(u)
+            else:
+                self._handle(u)
+        self._release_held()
 
     def finish(self) -> None:
-        pending: list[Utterance] = []
+        pending: list[Utterance] = list(self._held)
+        self._held.clear()
         for seg in self._segmenters.values():
             pending += seg.flush()
-        for u in sorted(pending, key=lambda u: u.t_start):
+        # system utterances first at equal times so echoes can be recognised
+        for u in sorted(pending, key=lambda u: (u.t_start, -int(u.channel))):
             self._handle(u)
+
+    @property
+    def degraded(self) -> bool:
+        return self._degraded
+
+    def set_degraded(self, on: bool) -> None:
+        """Switch live ASR to the fallback model while transcription lags behind."""
+        self._degraded = bool(on and self._fallback_asr is not None)
+        self.transcriber.backend = self._fallback_asr if self._degraded else self.backends.asr
+
+    def _release_held(self) -> None:
+        if not self._held:
+            return
+        sys_seg = self._segmenters.get(Channel.SYSTEM)
+        w = self.cfg.echo_window_s
+        keep: list[Utterance] = []
+        for u in self._held:
+            ready = sys_seg is None
+            if not ready:
+                horizon = u.t_end + w
+                open_start = sys_seg.open_start_s
+                passed = sys_seg.position_s >= horizon and (open_start is None or open_start > horizon)
+                ready = passed or sys_seg.position_s - u.t_end >= self.cfg.mic_hold_max_s
+            if ready:
+                self._handle(u)
+            else:
+                keep.append(u)
+        self._held = keep
 
     def _handle(self, u: Utterance) -> None:
         t0 = time.perf_counter()

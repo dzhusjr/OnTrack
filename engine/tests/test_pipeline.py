@@ -102,3 +102,55 @@ def test_resumed_session_keeps_original_time_origin(tmp_path):  # review #7
         p2.process(f)
     p2.finish()
     assert read_lines(w.dir)[-1].t_start == pytest.approx(60.0, abs=0.25)
+
+
+def test_mic_fragment_during_open_them_utterance_is_dropped_as_echo(tmp_path):  # M2 carry-over
+    p, w = make(
+        tmp_path,
+        [
+            ({"en": 1}, tr("we should ship the release on friday morning")),  # Them (emitted at ~6.6 s)
+            ({"en": 1}, tr("ship the release on friday")),  # mic fragment 1
+            ({"en": 1}, tr("release on friday morning")),  # mic fragment 2
+        ],
+    )
+    sys_ = frames(np.concatenate([tone(6.0, 0.3), silence(1.0)]), Channel.SYSTEM)
+    mic = frames(np.concatenate([silence(1.0), tone(1.5, 0.5), silence(1.0), tone(1.5, 0.5), silence(2.0)]), Channel.MIC)
+    for f in by_time(sys_ + mic):
+        p.process(f)
+    p.finish()
+    assert [l.speaker for l in read_lines(w.dir)] == [Speaker.THEM]
+
+
+def test_mic_only_session_not_delayed(tmp_path):
+    seen = []
+    p, w = make(tmp_path, [({"en": 1}, tr("hello"))], on_line=seen.append)
+    for f in frames(np.concatenate([tone(1.5), silence(1.0)]), Channel.MIC):
+        p.process(f)
+    assert [l.text for l in seen] == ["hello"]  # before finish()
+
+
+def test_hold_released_after_max(tmp_path):
+    cfg = replace(load_config(None), sessions_dir=tmp_path, mic_hold_max_s=3.0)
+    w = SessionWriter.start(tmp_path, "T", NOW)
+    asr = FakeAsr([({"en": 1}, tr("my own words here")), ({"en": 1}, tr("long talk from the call"))])
+    p = Pipeline(cfg, Backends(EnergyVad, asr, FakeEmbedder()), w, ME_VP)
+    sys_ = frames(np.concatenate([tone(10.0, 0.3), silence(1.0)]), Channel.SYSTEM)
+    mic = frames(np.concatenate([silence(0.5), tone(1.5, 0.5), silence(9.0)]), Channel.MIC)
+    for f in by_time(sys_ + mic):
+        p.process(f)
+    p.finish()
+    assert [l.speaker for l in read_lines(w.dir)] == [Speaker.OTHER, Speaker.THEM]
+
+
+def test_degraded_switches_backend(tmp_path):
+    cfg = replace(load_config(None), sessions_dir=tmp_path)
+    w = SessionWriter.start(tmp_path, "T", NOW)
+    main_asr, small_asr = FakeAsr([]), FakeAsr([({"en": 1}, tr("fast"))])
+    p = Pipeline(cfg, Backends(EnergyVad, main_asr, FakeEmbedder()), w, None, fallback_asr=small_asr)
+    p.set_degraded(True)
+    assert p.degraded
+    for f in frames(np.concatenate([tone(1.5), silence(1.0)]), Channel.MIC):
+        p.process(f)
+    assert small_asr.calls and not main_asr.calls
+    p.set_degraded(False)
+    assert p.transcriber.backend is main_asr
