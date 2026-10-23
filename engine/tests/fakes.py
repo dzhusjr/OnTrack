@@ -83,3 +83,10 @@ class FakeEmbedder:
         if amp == 0.5:
             return np.array([0.0, 1.0, 0.0])
         return np.array([0.0, 0.0, 1.0])
+
+
+# ---- Task 9: backends bundle ---------------------------------------------
+def fake_backends(transcripts):
+    from ontrack.pipeline import Backends
+
+    return Backends(EnergyVad, FakeAsr([({t.lang: 1.0}, t) for t in transcripts]), FakeEmbedder())
