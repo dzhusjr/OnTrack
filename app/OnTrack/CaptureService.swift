@@ -1,0 +1,186 @@
+import AVFoundation
+import CoreMedia
+import OnTrackCore
+import ScreenCaptureKit
+
+/// Captures the microphone (AVAudioEngine + Apple echo cancellation) and system audio (ScreenCaptureKit),
+/// both delivered as 16 kHz mono 20 ms frames with host-clock timestamps (spec §4.1 CaptureService).
+final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
+    /// Called on capture threads.
+    var onFrame: ((AudioChannel, UInt64, [Float]) -> Void)?
+    /// Human-readable problems (permissions, device changes). Called on the main queue.
+    var onIssue: ((String) -> Void)?
+
+    var echoCancellation = true
+    private(set) var isRunning = false
+
+    private var engine = AVAudioEngine()
+    private var micResampler: Resampler16k?
+    private var micChunker = FrameChunker()
+    private let micLock = NSLock()
+    private var configObserver: NSObjectProtocol?
+
+    private var stream: SCStream?
+    private var sysResampler: Resampler16k?
+    private var sysChunker = FrameChunker()
+    private let sysQueue = DispatchQueue(label: "ontrack.system-audio")
+    private var wantSystem = false
+
+    // MARK: lifecycle
+
+    func start(micOnly: Bool = false) {
+        guard !isRunning else { return }
+        isRunning = true
+        startMic()
+        wantSystem = !micOnly
+        if wantSystem { Task { await startSystem() } }
+    }
+
+    func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        wantSystem = false
+        stopMic()
+        if let s = stream {
+            stream = nil
+            Task { try? await s.stopCapture() }
+        }
+        sysQueue.async { self.sysChunker.reset() }
+    }
+
+    // MARK: microphone
+
+    private func startMic() {
+        engine = AVAudioEngine()
+        let input = engine.inputNode
+        if echoCancellation {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+                // Don't turn down Zoom/Meet/music while we listen.
+                input.voiceProcessingOtherAudioDuckingConfiguration =
+                    AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+            } catch {
+                report("Echo cancellation unavailable (\(error.localizedDescription)); continuing without it.")
+            }
+        }
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            report("No microphone input available.")
+            return
+        }
+        micResampler = Resampler16k(from: format)
+        micLock.lock()
+        micChunker.reset()
+        micLock.unlock()
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, time in
+            self?.handleMic(buffer, time)
+        }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            report("Microphone failed to start: \(error.localizedDescription)")
+        }
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isRunning else { return }
+            self.report("[audio source changed]")
+            self.stopMic()
+            self.startMic()
+        }
+    }
+
+    private func stopMic() {
+        if let o = configObserver { NotificationCenter.default.removeObserver(o) }
+        configObserver = nil
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+    }
+
+    private func handleMic(_ buffer: AVAudioPCMBuffer, _ time: AVAudioTime) {
+        guard let resampler = micResampler else { return }
+        let samples = resampler.convert(buffer)
+        let host = time.isHostTimeValid ? Self.ns(hostTime: time.hostTime) : Self.nowNs()
+        micLock.lock()
+        let frames = micChunker.append(samples, hostTimeNs: host)
+        micLock.unlock()
+        for f in frames { onFrame?(.mic, f.tNs, f.samples) }
+    }
+
+    // MARK: system audio
+
+    private func startSystem() async {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let display = content.displays.first else {
+                report("System audio: no display found.")
+                return
+            }
+            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+            let cfg = SCStreamConfiguration()
+            cfg.capturesAudio = true
+            cfg.excludesCurrentProcessAudio = true
+            cfg.sampleRate = 48_000
+            cfg.channelCount = 2
+            cfg.width = 2  // video is required by the API but unused
+            cfg.height = 2
+            cfg.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+            let s = SCStream(filter: filter, configuration: cfg, delegate: self)
+            try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: sysQueue)
+            try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: sysQueue)
+            try await s.startCapture()
+            guard wantSystem else {
+                try? await s.stopCapture()
+                return
+            }
+            stream = s
+        } catch {
+            report("System audio unavailable — allow OnTrack in System Settings → Privacy & Security → Screen & System Audio Recording. (\(error.localizedDescription))")
+        }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio, sampleBuffer.isValid, let pcm = Self.pcmBuffer(from: sampleBuffer) else { return }
+        if sysResampler == nil || sysResampler?.inputFormat != pcm.format {
+            sysResampler = Resampler16k(from: pcm.format)
+        }
+        guard let resampler = sysResampler else { return }
+        let samples = resampler.convert(pcm)
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let host = pts.isValid ? UInt64(max(0, pts.seconds) * 1e9) : Self.nowNs()
+        for f in sysChunker.append(samples, hostTimeNs: host) { onFrame?(.system, f.tNs, f.samples) }
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        report("System audio stopped: \(error.localizedDescription) — retrying")
+        self.stream = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, self.isRunning, self.wantSystem else { return }
+            Task { await self.startSystem() }
+        }
+    }
+
+    // MARK: helpers
+
+    private func report(_ text: String) {
+        DispatchQueue.main.async { self.onIssue?(text) }
+    }
+
+    static func ns(hostTime: UInt64) -> UInt64 { UInt64(AVAudioTime.seconds(forHostTime: hostTime) * 1e9) }
+    static func nowNs() -> UInt64 { ns(hostTime: mach_absolute_time()) }
+
+    static func pcmBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+        guard let desc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc),
+              let format = AVAudioFormat(streamDescription: asbd)
+        else { return nil }
+        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
+        buffer.frameLength = frames
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer, at: 0, frameCount: Int32(frames), into: buffer.mutableAudioBufferList
+        )
+        return status == noErr ? buffer : nil
+    }
+}
