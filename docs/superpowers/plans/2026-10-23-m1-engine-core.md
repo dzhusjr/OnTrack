@@ -157,8 +157,8 @@ def test_wav_source_resamples_stereo_44k(tmp_path):          # Review Focus 2
 
 def test_socket_source_reads_until_eof(tmp_path):
     sock = tmp_path / "a.sock"; src = SocketAudioSource(sock)
-    # client thread connects, sends 3 encoded frames, closes
-    ...  # implementer: start iter in main thread after spawning client thread that waits for sock to exist
+    # a client thread polls until `sock` exists, connects, sends 3 encoded 320-sample MIC frames (t_ns 0, 20 ms, 40 ms), closes
+    got = list(src.iter_frames())
     assert [f.t_ns for f in got] == [0, 20_000_000, 40_000_000]
 ```
 
@@ -179,7 +179,7 @@ def test_socket_source_reads_until_eof(tmp_path):
 - Produces:
   - `class Vad(Protocol): window: int; def speech_prob(self, window: np.ndarray) -> float` (window = 512 samples, Silero's size)
   - `class Segmenter(channel: Channel, vad: Vad, cfg: Config, origin_ns: int)`: `push(frame: AudioFrame) -> list[Utterance]`, `flush() -> list[Utterance]`
-  - `tests/fakes.py`: `class EnergyVad(Vad)` — `window = 512`, returns `1.0` if RMS > 0.01 else `0.0`; helpers `tone(seconds, amp=0.3)`, `silence(seconds)`, `frames(samples, channel, start_ns=0) -> list[AudioFrame]`
+  - `tests/fakes.py`: `class EnergyVad(Vad)` — `window = 512`, returns `1.0` if RMS > 0.01 else `0.0`; helpers `tone(seconds, amp=0.3)`, `silence(seconds)`, `frames(samples, channel, start_ns=0) -> list[AudioFrame]`; plus shared test helpers used by later tasks (each added in the task that first needs it): `utt(channel=Channel.MIC, t_start=0.0, t_end=2.0, amp=0.3) -> Utterance` (constant-amplitude samples), `tr(text, lang="en") -> Transcript` (confident: logprob -0.2, no_speech 0.0, compression 1.0), `fake_backends(transcripts: list[Transcript]) -> Backends` (lang probs `{t.lang: 1.0}`), constants `ME_VP = np.array([1.0, 0, 0])`, `NOW = datetime(2026, 10, 23, 14, 5)`
 
 - [ ] **Step 1: Write the failing tests**
 
