@@ -3,6 +3,13 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "✗ Missing '$1' — $2"; exit 1; }; }
+need_xcode() {
+  if xcode-select -p 2>/dev/null | grep -q CommandLineTools; then
+    echo "✗ The active developer directory is the Command Line Tools (no XCTest, no xcodebuild). Run:"
+    echo "    sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+    exit 1
+  fi
+}
 
 setup() {
   need uv "brew install uv"
@@ -17,12 +24,14 @@ setup() {
 
 test_all() {
   (cd "$ROOT/engine" && uv run pytest -q)
+  need_xcode
   (cd "$ROOT/app/OnTrackCore" && swift test)
 }
 
 app() {
   need xcodegen "brew install xcodegen"
   need xcodebuild "install Xcode"
+  need_xcode
   cd "$ROOT/app"
   xcodegen generate --quiet
   xcodebuild -project OnTrack.xcodeproj -scheme OnTrack -configuration Release \
