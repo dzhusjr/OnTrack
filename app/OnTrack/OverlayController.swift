@@ -32,6 +32,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
     private let hosting: NSHostingController<OverlayView>
     private var cancellables: Set<AnyCancellable> = []
     private var lastMode: OverlayMode = .hidden
+    private var positioned = false  // false until the panel has been placed at its saved/default spot
     private static let positionKey = "overlayTopLeft"
 
     init(store: OverlayStore, onOpenNotes: @escaping (String) -> Void, onOpenSettings: @escaping (String) -> Void) {
@@ -55,8 +56,9 @@ final class OverlayController: NSObject, NSWindowDelegate {
             lastMode = state.mode
             return
         }
-        // Resize to content, keeping the top edge fixed (grows downward like Spotlight).
-        DispatchQueue.main.async { [weak self] in self?.layout() }
+        // Size and place BEFORE showing, so it never flashes at the screen origin.
+        layout()
+        DispatchQueue.main.async { [weak self] in self?.layout() }  // again once SwiftUI has applied the new state
         if state.mode == .expanded {
             panel.makeKeyAndOrderFront(nil)
         } else {
@@ -74,10 +76,11 @@ final class OverlayController: NSObject, NSWindowDelegate {
         var size = hosting.sizeThatFits(in: NSSize(width: 560, height: 2000))
         if size.width < 100 || size.height < 20 { size = NSSize(width: 560, height: max(size.height, 64)) }
         let top: NSPoint
-        if panel.frame.height > 1, panel.isVisible {
-            top = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+        if positioned {
+            top = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)  // keep the top edge; grow downward
         } else {
             top = savedTopLeft() ?? defaultTopLeft()
+            positioned = true
         }
         panel.setFrame(NSRect(x: top.x, y: top.y - size.height, width: size.width, height: size.height), display: true)
     }
@@ -95,6 +98,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        guard positioned else { return }
         UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: panel.frame.minX, y: panel.frame.maxY)), forKey: Self.positionKey)
     }
 }
