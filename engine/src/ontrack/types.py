@@ -20,6 +20,7 @@ class Speaker(str, Enum):
     ME = "Me"
     OTHER = "Other"
     THEM = "Them"
+    NOTE = "Note"  # system markers such as [gap 00:12]
 
 
 @dataclass(frozen=True, eq=False)

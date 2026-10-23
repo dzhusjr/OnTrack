@@ -94,3 +94,15 @@ def test_stale_frame_is_dropped():  # review #5
     for f in fs[:30] + fs[0:15] + fs[30:]:  # 300 ms of stale/duplicate frames replayed
         out += seg.push(f)
     assert len(out) == 1 and len(out[0].samples) <= 1.0 * 16000 + 512 + 1600  # ≤100 ms jitter tolerance
+
+
+def test_position_and_open_start_reported():
+    seg = Segmenter(Channel.MIC, EnergyVad(), load_config(None), origin_ns=0)
+    assert seg.position_s == 0.0 and seg.open_start_s is None
+    for f in frames(np.concatenate([silence(1.0), tone(1.0)]), Channel.MIC):
+        seg.push(f)
+    assert seg.position_s == pytest.approx(2.0, abs=0.04)
+    assert seg.open_start_s == pytest.approx(0.8, abs=0.04)
+    for f in frames(silence(1.0), Channel.MIC, start_ns=2_000_000_000):
+        seg.push(f)
+    assert seg.open_start_s is None

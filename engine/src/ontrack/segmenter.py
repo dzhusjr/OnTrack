@@ -32,6 +32,16 @@ class Segmenter:
         self._silence_run = 0
 
     # ---- public API ---------------------------------------------------
+    @property
+    def position_s(self) -> float:
+        """Session time up to which audio has been VAD-processed."""
+        return (self._pos or 0) / SAMPLE_RATE
+
+    @property
+    def open_start_s(self) -> float | None:
+        """Start time of the utterance currently being collected, or None when idle."""
+        return None if self._start is None else self._start / SAMPLE_RATE
+
     def push(self, frame: AudioFrame) -> list[Utterance]:
         frame_pos = round((frame.t_ns - self.origin_ns) * SAMPLE_RATE / 1e9)
         out: list[Utterance] = []

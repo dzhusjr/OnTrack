@@ -28,6 +28,17 @@ class Config:
     app_support_dir: Path = field(
         default_factory=lambda: Path("~/Library/Application Support/OnTrack").expanduser()
     )
+    notes_dir: Path = field(default_factory=lambda: Path("~/Desktop/Work/OnTrack/notes").expanduser())
+    llm_model: str = "sonnet"
+    claude_path: str = ""
+    qa_timeout_s: float = 60
+    summary_timeout_s: float = 300
+    fallback_whisper_model: str = "mlx-community/whisper-small-mlx"
+    degraded_lag_s: float = 20.0
+    mic_hold_max_s: float = 15.0
+    gap_marker_s: float = 10.0
+    overlay_lines: int = 3
+    retranscribe: bool = True
 
 
 def _coerce(f: dataclasses.Field, value):
@@ -36,6 +47,10 @@ def _coerce(f: dataclasses.Field, value):
         return Path(str(value)).expanduser()
     if isinstance(default, tuple):
         return tuple(value)
+    if isinstance(default, bool):
+        if not isinstance(value, bool):
+            raise ValueError(f"{f.name} must be true/false")
+        return value
     if isinstance(default, float):
         return float(value)
     if isinstance(default, int):

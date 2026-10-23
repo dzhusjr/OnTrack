@@ -26,3 +26,18 @@ def test_unknown_key_rejected(tmp_path):
 
 def test_missing_file_uses_defaults(tmp_path):
     assert load_config(tmp_path / "nope.toml") == load_config(None)
+
+
+def test_full_system_defaults():
+    c = load_config(None)
+    assert c.notes_dir.name == "notes" and c.llm_model == "sonnet" and c.claude_path == ""
+    assert c.qa_timeout_s == 60 and c.summary_timeout_s == 300
+    assert c.degraded_lag_s == 20.0 and c.mic_hold_max_s == 15.0 and c.gap_marker_s == 10.0
+    assert c.overlay_lines == 3 and c.retranscribe is True
+    assert c.fallback_whisper_model == "mlx-community/whisper-small-mlx"
+
+
+def test_bool_override(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text("retranscribe = false\n")
+    assert load_config(p).retranscribe is False
