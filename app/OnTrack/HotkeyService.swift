@@ -19,6 +19,7 @@ final class HotkeyService {
         let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
         if status == noErr, let ref {
             refs.append(ref)
+            NSLog("OnTrack: hotkey %u registered", id)
             return true
         }
         NSLog("OnTrack: hotkey %u could not be registered (%d) — another app may own it", id, status)
