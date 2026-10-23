@@ -6,6 +6,13 @@ import sys
 import time
 
 mode = os.environ.get("FAKE_CLAUDE_MODE", "deltas")
+reject = os.environ.get("FAKE_CLAUDE_REJECT")
+if reject and reject in sys.argv:
+    print(f"error: unknown option '{reject}'", file=sys.stderr)
+    sys.exit(1)
+if mode == "nonode":
+    print("env: node: No such file or directory", file=sys.stderr)
+    sys.exit(127)
 prompt = sys.stdin.read()
 log = os.environ.get("FAKE_CLAUDE_LOG")
 if log:

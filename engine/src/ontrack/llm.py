@@ -36,6 +36,10 @@ def find_claude(cfg: Config) -> Path | None:
 
 def _classify(text: str) -> str:
     t = text.lower()
+    if "unknown option" in t or "unknown argument" in t:
+        return "llm_unsupported"
+    if "no such file" in t or "command not found" in t:
+        return "llm_missing"
     if "rate limit" in t or "429" in t or "usage limit" in t or "overloaded" in t:
         return "llm_rate_limit"
     if "login" in t or "auth" in t or "401" in t or "api key" in t:
@@ -47,13 +51,22 @@ class ClaudeRunner:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
 
-    def _cmd(self, exe: Path) -> list[str]:
+    def _cmd(self, exe: Path, extra: tuple[str, ...]) -> list[str]:
         return [
             str(exe), "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            "--model", self.cfg.llm_model, *self.cfg.llm_extra_args,
+            "--model", self.cfg.llm_model, *extra,
         ]
 
     def stream(self, prompt: str, timeout_s: float) -> Iterator[str]:
+        try:
+            yield from self._stream(prompt, timeout_s, tuple(self.cfg.llm_extra_args))
+        except LlmError as e:
+            if e.code != "llm_unsupported" or not self.cfg.llm_extra_args:
+                raise
+            # older Claude Code without these flags: retry plain
+            yield from self._stream(prompt, timeout_s, ())
+
+    def _stream(self, prompt: str, timeout_s: float, extra: tuple[str, ...]) -> Iterator[str]:
         exe = find_claude(self.cfg)
         if exe is None:
             raise LlmError("llm_missing", "Claude Code CLI not found — install it and run `claude` once to log in.")
@@ -61,7 +74,7 @@ class ClaudeRunner:
         env = dict(os.environ)
         env["PATH"] = os.pathsep.join([env.get("PATH", "")] + [os.path.expanduser(p) for p in _EXTRA_PATHS])
         proc = subprocess.Popen(
-            self._cmd(exe), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            self._cmd(exe, extra), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             cwd=workdir, env=env, text=True, encoding="utf-8",
         )
         lines: queue.Queue[str | None] = queue.Queue()
@@ -119,7 +132,10 @@ class ClaudeRunner:
             if proc.returncode != 0:
                 time.sleep(0.05)
                 err = "".join(stderr_buf).strip() or f"claude exited with {proc.returncode}"
-                raise LlmError(_classify(err), err)
+                code = "llm_missing" if proc.returncode == 127 else _classify(err)
+                if code == "llm_missing":
+                    err += " — set claude_path in OnTrack's engine config to the full path of `claude`."
+                raise LlmError(code, err)
         finally:
             if proc.poll() is None:
                 proc.kill()

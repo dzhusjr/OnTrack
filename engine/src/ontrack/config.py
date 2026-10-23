@@ -31,7 +31,8 @@ class Config:
     notes_dir: Path = field(default_factory=lambda: Path("~/Desktop/Work/OnTrack/notes").expanduser())
     llm_model: str = "sonnet"
     claude_path: str = ""
-    llm_extra_args: tuple[str, ...] = ()
+    llm_extra_args: tuple[str, ...] = ("--strict-mcp-config", "--tools", "")  # Q&A only: no tools, no MCP servers
+    max_backlog_s: float = 120.0
     qa_timeout_s: float = 60
     summary_timeout_s: float = 300
     fallback_whisper_model: str = "mlx-community/whisper-small-mlx"

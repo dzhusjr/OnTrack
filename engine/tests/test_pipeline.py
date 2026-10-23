@@ -154,3 +154,15 @@ def test_degraded_switches_backend(tmp_path):
     assert small_asr.calls and not main_asr.calls
     p.set_degraded(False)
     assert p.transcriber.backend is main_asr
+
+
+def test_mic_released_when_system_audio_stalls(tmp_path):  # review M2 #4
+    seen = []
+    cfg = replace(load_config(None), sessions_dir=tmp_path, mic_hold_max_s=3.0)
+    w = SessionWriter.start(tmp_path, "T", NOW)
+    p = Pipeline(cfg, Backends(EnergyVad, FakeAsr([({"en": 1}, tr("still hear you"))]), FakeEmbedder()), w, ME_VP, seen.append)
+    for f in frames(silence(1.0), Channel.SYSTEM):  # system stream starts, then stops forever
+        p.process(f)
+    for f in frames(np.concatenate([tone(1.5, 0.5), silence(6.0)]), Channel.MIC):
+        p.process(f)
+    assert [l.text for l in seen] == ["still hear you"]  # released before finish()

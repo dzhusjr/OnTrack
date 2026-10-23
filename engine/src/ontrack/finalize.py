@@ -40,6 +40,7 @@ def finalize(
     action: str,
     deps: FinalizeDeps,
     progress: Callable[[str, float], None],
+    on_summary_error: Callable[[LlmError], None] | None = None,
 ) -> Path | None:
     if action not in ACTIONS:
         raise ValueError(f"unknown finalize action {action!r}")
@@ -67,6 +68,8 @@ def finalize(
         except LlmError as e:
             log.warning("summary failed (%s): %s", e.code, e.message)
             (notes / "summary_pending").write_text(e.code, encoding="utf-8")
+            if on_summary_error:
+                on_summary_error(e)
 
     progress("saving", 0.9)
     final = session_dir / "transcript.final.md"

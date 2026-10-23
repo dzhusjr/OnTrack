@@ -51,3 +51,24 @@ def test_missing_channel_is_empty_and_delete(tmp_path):
     rec.close()
     delete_audio(tmp_path / "a")
     assert not (tmp_path / "a").exists()
+
+
+def test_resume_after_kill_with_unclosed_chunk(tmp_path):  # review M2 #2
+    import shutil
+
+    import soundfile as sf
+
+    d = tmp_path / "a"
+    d.mkdir()
+    f = sf.SoundFile(str(tmp_path / "live.flac"), "w", 16000, 1, format="FLAC", subtype="PCM_16")
+    f.write(tone(2.0))
+    f.flush()
+    shutil.copy(tmp_path / "live.flac", d / "mic-0000.flac")  # snapshot of a file never closed (SIGKILL)
+    f.close()
+    rec = AudioRecorder(d, origin_ns=0)
+    for fr in frames(tone(1.0), Channel.MIC, start_ns=3_000_000_000):
+        rec.write(fr)
+    rec.close()
+    y = load_channel(d, Channel.MIC)
+    assert len(y) == pytest.approx(4.0 * 16000, abs=0.3 * 16000)
+    assert np.abs(y[int(3.2 * 16000) : int(3.8 * 16000)]).max() > 0.1  # new audio landed at session time 3 s

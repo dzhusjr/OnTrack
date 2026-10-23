@@ -16,11 +16,42 @@ def _chunks(audio_dir: Path, channel: Channel) -> list[Path]:
     return sorted(Path(audio_dir).glob(f"{_NAMES[channel]}-*.flac"))
 
 
+def _decode_tolerant(path: Path) -> np.ndarray:
+    """Decode as much of a FLAC chunk as possible (chunks left open by a crash have a bogus length)."""
+    parts: list[np.ndarray] = []
+    try:
+        with sf.SoundFile(str(path)) as f:
+            while True:
+                try:
+                    block = f.read(SAMPLE_RATE, dtype="float32")
+                except Exception:
+                    break
+                if len(block) == 0:
+                    break
+                parts.append(block.reshape(-1) if block.ndim == 1 else block.mean(axis=1))
+    except Exception:
+        pass
+    return np.concatenate(parts).astype(np.float32, copy=False) if parts else np.zeros(0, np.float32)
+
+
+def _chunk_frames(path: Path, chunk: int) -> int:
+    """Sample count of a chunk; repairs (re-encodes) chunks whose header was never finalised."""
+    try:
+        frames = sf.info(str(path)).frames
+        if 0 <= frames <= 2 * chunk:
+            return frames
+    except Exception:
+        pass
+    data = _decode_tolerant(path)
+    sf.write(str(path), data, SAMPLE_RATE, format="FLAC", subtype="PCM_16")
+    return len(data)
+
+
 class _ChannelWriter:
     def __init__(self, audio_dir: Path, channel: Channel, chunk: int) -> None:
         self.dir, self.channel, self.chunk = audio_dir, channel, chunk
         existing = _chunks(audio_dir, channel)
-        self.written = sum(sf.info(str(p)).frames for p in existing)  # samples since session origin
+        self.written = sum(_chunk_frames(p, chunk) for p in existing)  # samples since session origin
         self.idx = len(existing)
         self.file: sf.SoundFile | None = None
         self.in_file = 0
@@ -74,8 +105,8 @@ class AudioRecorder:
 
 
 def load_channel(audio_dir: Path, channel: Channel) -> np.ndarray:
-    parts = [sf.read(str(p), dtype="float32")[0] for p in _chunks(audio_dir, channel)]
-    return np.concatenate(parts).astype(np.float32) if parts else np.zeros(0, np.float32)
+    parts = [_decode_tolerant(p) for p in _chunks(audio_dir, channel)]
+    return np.concatenate(parts) if parts else np.zeros(0, np.float32)
 
 
 def delete_audio(audio_dir: Path) -> None:

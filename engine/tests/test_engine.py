@@ -196,8 +196,9 @@ def test_resume_same_session_id_continues_seq_and_time(dirs):  # Review Focus 1
         st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
         assert st["session_id"] == state["id"]
         await c.audio(frames(SPEECH, Channel.MIC, start_ns=65_000_000_000))
-        line = await c.expect(typ("line"))
-        assert line["seq"] == 1 and line["t_start"] == pytest.approx(60.0, abs=0.25)
+        note = await c.expect(lambda m: m["type"] == "line" and m["speaker"] == "Note")
+        line = await c.expect(lambda m: m["type"] == "line" and m["speaker"] != "Note")
+        assert note["seq"] == 1 and line["seq"] == 2 and line["t_start"] == pytest.approx(60.0, abs=0.25)
         await c.close()
 
     asyncio.run(run_with(svc2, second))
@@ -247,3 +248,121 @@ def test_unknown_message_returns_error(dirs):
         await c.close()
 
     asyncio.run(run_with(svc, body))
+
+
+def test_resume_after_crash_writes_gap_note(dirs):  # review M2 #1
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("before"))])
+    state = {}
+
+    async def first():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        state["id"] = st["session_id"]
+        await c.audio(frames(SPEECH, Channel.MIC))
+        await c.expect(typ("line"))
+        await c.close()
+
+    asyncio.run(run_with(svc, first))
+    svc2, _ = make_service(dirs, [({"en": 1}, tr("after"))])
+
+    async def second():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L", "session_id": state["id"]})
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.MIC, start_ns=30_000_000_000))
+        note = await c.expect(lambda m: m["type"] == "line" and m["speaker"] == "Note")
+        assert note["text"].startswith("[gap 00:2")
+        await c.close()
+
+    asyncio.run(run_with(svc2, second))
+
+
+def test_summary_failure_reported_before_finalize_done(dirs):  # review M2 #5
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("hello"))], [LlmError("llm_auth", "please log in")])
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.MIC))
+        await c.expect(typ("line"))
+        await c.send({"type": "stop_session"})
+        await c.expect(typ("session_stopped"))
+        await c.send({"type": "finalize", "session_id": st["session_id"], "action": "save_all"})
+        err = await c.expect(typ("error"))
+        assert err["code"] == "summary_failed" and "log in" in err["message"]
+        await c.expect(typ("finalize_done"))
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+
+
+def test_finalize_previous_session_while_recording_next(dirs):  # review M2 #6
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("first"))], [["## TL;DR\nok"]])
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "A"})
+        a = (await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording"))["session_id"]
+        await c.audio(frames(SPEECH, Channel.MIC))
+        await c.expect(typ("line"))
+        await c.send({"type": "stop_session"})
+        await c.expect(typ("session_stopped"))
+        await c.send({"type": "start_session", "name": "B"})
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording" and m["session_id"] != a)
+        await c.send({"type": "finalize", "session_id": a, "action": "save_all"})
+        done = await c.expect(typ("finalize_done"))
+        assert done["session_id"] == a and done["notes_path"]
+        await c.send({"type": "finalize", "session_id": "../../etc", "action": "discard"})
+        assert (await c.expect(typ("error")))["code"] == "no_session"
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+
+
+def test_shutdown_does_not_remove_a_newer_engines_socket(dirs):  # review M2 #8
+    svc, cfg = make_service(dirs)
+
+    async def body():
+        await Client(cfg).connect()
+        ctrl = cfg.app_support_dir / "control.sock"
+        ctrl.unlink()
+        ctrl.write_text("newer engine")  # another engine took the path
+
+    asyncio.run(run_with(svc, body))
+    assert (cfg.app_support_dir / "control.sock").read_text() == "newer engine"
+
+
+def test_backlog_is_bounded(dirs):  # review M2 #9
+    svc, cfg = make_service(dirs)
+    svc.cfg = replace(cfg, max_backlog_s=1.0)
+    svc._start_session("L", None)
+    for f in frames(tone(5.0), Channel.MIC):  # worker not running: nothing is consumed
+        svc._on_frame(f)
+    assert svc._work.qsize() <= 50 + 1 and svc.dropped_frames >= 190
+
+
+def test_locked_asr_serialises_calls():  # review M2 #10
+    import threading
+    import time
+
+    from ontrack.engine import LockedAsr
+
+    active, peak = [0], [0]
+
+    class Slow:
+        def detect_language(self, s):
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            time.sleep(0.05)
+            active[0] -= 1
+            return {"en": 1.0}
+
+        run = None
+
+    asr = LockedAsr(Slow())
+    ts = [threading.Thread(target=asr.detect_language, args=(None,)) for _ in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert peak[0] == 1

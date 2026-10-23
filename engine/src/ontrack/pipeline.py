@@ -124,6 +124,8 @@ class Pipeline:
         if not self._held:
             return
         sys_seg = self._segmenters.get(Channel.SYSTEM)
+        mic_seg = self._segmenters.get(Channel.MIC)
+        mic_pos = mic_seg.position_s if mic_seg is not None else 0.0
         w = self.cfg.echo_window_s
         keep: list[Utterance] = []
         for u in self._held:
@@ -132,7 +134,9 @@ class Pipeline:
                 horizon = u.t_end + w
                 open_start = sys_seg.open_start_s
                 passed = sys_seg.position_s >= horizon and (open_start is None or open_start > horizon)
-                ready = passed or sys_seg.position_s - u.t_end >= self.cfg.mic_hold_max_s
+                # time out on the mic clock too: system audio may stall (screen locked, capture error)
+                waited = max(sys_seg.position_s, mic_pos) - u.t_end
+                ready = passed or waited >= self.cfg.mic_hold_max_s
             if ready:
                 self._handle(u)
             else:

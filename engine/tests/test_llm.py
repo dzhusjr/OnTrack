@@ -70,3 +70,24 @@ def test_auth_failure_mapped(fake, monkeypatch):
     with pytest.raises(LlmError) as e:
         ClaudeRunner(fake).complete("x", 10)
     assert e.value.code == "llm_auth"
+
+
+def test_old_cli_without_flags_falls_back(fake, monkeypatch, tmp_path):  # review M2 #13
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "deltas")
+    monkeypatch.setenv("FAKE_CLAUDE_REJECT", "--strict-mcp-config")
+    cfg = replace(fake, llm_extra_args=("--strict-mcp-config", "--tools", ""))
+    assert ClaudeRunner(cfg).complete("hi", 10) == "Hello Roman"
+
+
+def test_default_flags_restrict_tools_and_mcp(fake, monkeypatch, tmp_path):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "deltas")
+    ClaudeRunner(replace(fake, llm_extra_args=load_config(None).llm_extra_args)).complete("x", 10)
+    argv = json.loads((tmp_path / "log.json").read_text())["argv"]
+    assert "--strict-mcp-config" in argv and argv[argv.index("--tools") + 1] == ""
+
+
+def test_node_missing_maps_to_llm_missing(fake, monkeypatch):  # review M2 #12
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "nonode")
+    with pytest.raises(LlmError) as e:
+        ClaudeRunner(fake).complete("x", 10)
+    assert e.value.code == "llm_missing"

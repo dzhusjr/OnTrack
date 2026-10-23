@@ -6,7 +6,9 @@ import asyncio
 import concurrent.futures
 import logging
 import logging.handlers
+import os
 import queue
+import re
 import signal
 import threading
 from datetime import datetime
@@ -22,13 +24,36 @@ from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .qa import QaService
 from .recorder import AudioRecorder
-from .session import SessionWriter
+from .session import SessionWriter, read_lines
 from .speaker import enroll, load_voiceprint
 from .transcriber import Transcriber
 from .types import SAMPLE_RATE, AudioFrame, Channel, Line, Speaker
 
 log = logging.getLogger("ontrack.engine")
 ENROLL_SECONDS = 30
+_SAFE_ID = re.compile(r"^[^/\\]+$")
+
+
+class LockedAsr:
+    """Serialises all use of one ASR model (MLX is not thread-safe): warm-up, live pipeline, finalize."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self._lock = threading.Lock()
+
+    def detect_language(self, samples):
+        with self._lock:
+            return self._inner.detect_language(samples)
+
+    def run(self, samples, language, initial_prompt):
+        with self._lock:
+            return self._inner.run(samples, language, initial_prompt)
+
+    def warmup(self):
+        with self._lock:
+            warm = getattr(self._inner, "warmup", None)
+            if warm:
+                warm()
 
 
 def _mmss(seconds: float) -> str:
@@ -39,13 +64,13 @@ def _mmss(seconds: float) -> str:
 class EngineService:
     def __init__(self, cfg: Config, backends: Backends, runner, diarizer=None, fallback_asr=None) -> None:
         self.cfg = cfg
-        self.backends = backends
+        self.model_ready = not (isinstance(backends.asr, Lazy) or hasattr(backends.asr, "warmup"))
+        self.backends = Backends(backends.vad_factory, LockedAsr(backends.asr), backends.embedder)
         self.runner = runner
         self.diarizer = diarizer
-        self.fallback_asr = fallback_asr
+        self.fallback_asr = LockedAsr(fallback_asr) if fallback_asr is not None else None
         self.qa = QaService(runner, cfg)
         self.state = "idle"
-        self.model_ready = not (isinstance(backends.asr, Lazy) or hasattr(backends.asr, "warmup"))
         self.degraded = False
         self.writer: SessionWriter | None = None
         self.pipeline: Pipeline | None = None
@@ -65,6 +90,11 @@ class EngineService:
         self._enqueued_t = 0
         self._processed_t = 0
         self._stopping: asyncio.Event | None = None
+        self._socket_inodes: dict[Path, int] = {}
+        self._finalizing: set[str] = set()
+        self._resume_last_s: float | None = None
+        self.dropped_frames = 0
+        self._dropping_since: float | None = None
 
     # ---- paths ------------------------------------------------------------------
     def _audio_dir(self, session_id: str) -> Path:
@@ -81,6 +111,7 @@ class EngineService:
             p.unlink(missing_ok=True)
         ctrl_srv = await asyncio.start_unix_server(self._on_control, path=str(ctrl_path))
         audio_srv = await asyncio.start_unix_server(self._on_audio, path=str(audio_path))
+        self._socket_inodes = {p: os.stat(p).st_ino for p in (ctrl_path, audio_path)}
         worker = threading.Thread(target=self._work_loop, name="ontrack-pipeline", daemon=True)
         worker.start()
         if not self.model_ready:
@@ -97,8 +128,12 @@ class EngineService:
                 await srv.wait_closed()
             self._work.put(("quit", None))
             worker.join(timeout=5)
-            for p in (ctrl_path, audio_path):
-                p.unlink(missing_ok=True)
+            for p, ino in self._socket_inodes.items():
+                try:  # never delete a socket that a newer engine has created at the same path
+                    if os.stat(p).st_ino == ino:
+                        p.unlink()
+                except FileNotFoundError:
+                    pass
             self._pool.shutdown(wait=False, cancel_futures=True)
             log.info("engine stopped")
 
@@ -110,9 +145,7 @@ class EngineService:
 
     def _warmup(self) -> None:
         try:
-            warm = getattr(self.backends.asr, "warmup", None)
-            if warm:
-                warm()
+            self.backends.asr.warmup()
         except Exception:
             log.exception("model warm-up failed")
         self._call(self._set_ready)
@@ -230,15 +263,18 @@ class EngineService:
             else:
                 self._send_now(self._error("already_recording", "A session is already recording."))
             return
-        if self.state != "idle":
+        if self.state not in ("idle", "postprocessing"):
             self._send_now(self._error("busy", f"Cannot start while {self.state}."))
             return
         existing = self.cfg.sessions_dir / session_id if session_id else None
         if existing is not None and (existing / "meta.json").exists():
             self.writer = SessionWriter.resume(existing)
+            lines = read_lines(existing)
+            self._resume_last_s = max((l.t_end for l in lines), default=None)
             log.info("resumed session %s", self.writer.id)
         else:
             self.writer = SessionWriter.start(self.cfg.sessions_dir, name, datetime.now())
+            self._resume_last_s = None
             log.info("started session %s", self.writer.id)
         self._voiceprint = load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy")
         self.pipeline = None
@@ -248,6 +284,8 @@ class EngineService:
         self._last_note_t = -1e9
         self._enqueued_t = self._processed_t = 0
         self.degraded = False
+        self.dropped_frames = 0
+        self._dropping_since = None
         self._set_state("recording")
 
     async def _stop_session(self, notify: bool) -> None:
@@ -280,7 +318,10 @@ class EngineService:
         try:
             while data := await reader.read(65536):
                 for frame in dec.feed(data):
-                    self._on_frame(frame)
+                    try:
+                        self._on_frame(frame)
+                    except Exception:
+                        log.exception("frame handling failed")
         except (ConnectionError, asyncio.IncompleteReadError):
             pass
         finally:
@@ -312,6 +353,12 @@ class EngineService:
                                      fallback_asr=self.fallback_asr)
         if self.recorder is None:
             self.recorder = AudioRecorder(self._audio_dir(self.writer.id), origin)
+        t_now = (f.t_ns - origin) / 1e9
+        if self._resume_last_s is not None:
+            if t_now - self._resume_last_s > self.cfg.gap_marker_s:
+                self._last_note_t = self._resume_last_s
+                self._work.put(("note", (self._resume_last_s, f"[gap {_mmss(t_now - self._resume_last_s)}]")))
+            self._resume_last_s = None
         last = self._last_t.get(f.channel)
         if last is not None and f.t_ns - last > self.cfg.gap_marker_s * 1e9:
             gap_start = (last - origin) / 1e9
@@ -323,6 +370,16 @@ class EngineService:
             self.recorder.write(f)
         except Exception:
             log.exception("audio recording failed (disk full?) — transcript continues")
+        if self._work.qsize() >= int(self.cfg.max_backlog_s * 50):
+            # transcription is too far behind: skip live audio (it is still recorded for post-processing)
+            self.dropped_frames += 1
+            if self._dropping_since is None:
+                self._dropping_since = t_now
+                log.warning("backlog over %.0f s — dropping live audio", self.cfg.max_backlog_s)
+            return
+        if self._dropping_since is not None:
+            self._work.put(("note", (self._dropping_since, f"[skipped {_mmss(t_now - self._dropping_since)} — transcription fell behind]")))
+            self._dropping_since = None
         self._enqueued_t = max(self._enqueued_t, f.t_ns)
         self._work.put(("frame", f))
 
@@ -396,15 +453,24 @@ class EngineService:
 
         self._pool.submit(job)
 
+    def _valid_session(self, session_id: str) -> Path | None:
+        if not _SAFE_ID.match(session_id) or session_id in (".", ".."):
+            return None
+        d = self.cfg.sessions_dir / session_id
+        return d if (d / "meta.json").exists() else None
+
     def _finalize(self, session_id: str, action: str) -> None:
-        session_dir = self.cfg.sessions_dir / session_id
-        if self.state != "idle":
-            self._send_now(self._error("busy", f"Cannot finalize while {self.state}."))
-            return
-        if not (session_dir / "meta.json").exists():
+        session_dir = self._valid_session(session_id)
+        if session_dir is None:
             self._send_now(self._error("no_session", f"Unknown session {session_id}"))
             return
-        self._set_state("postprocessing")
+        recording_this = self.writer is not None and self.writer.id == session_id and self.state in ("recording", "stopping")
+        if recording_this or session_id in self._finalizing:
+            self._send_now(self._error("busy", "That session is still recording or already being saved."))
+            return
+        self._finalizing.add(session_id)
+        if self.state == "idle":
+            self._set_state("postprocessing")
         transcriber = Transcriber(self.backends.asr, self.cfg) if self.cfg.retranscribe else None
         deps = FinalizeDeps(self.diarizer, self.backends.embedder,
                             load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy"),
@@ -412,9 +478,13 @@ class EngineService:
 
         def job() -> None:
             try:
-                notes = finalize(session_dir, self._audio_dir(session_id), action, deps,
-                                 lambda stage, pct: self.send({"type": "finalize_progress", "session_id": session_id,
-                                                               "stage": stage, "pct": round(pct, 3)}))
+                notes = finalize(
+                    session_dir, self._audio_dir(session_id), action, deps,
+                    lambda stage, pct: self.send({"type": "finalize_progress", "session_id": session_id,
+                                                  "stage": stage, "pct": round(pct, 3)}),
+                    on_summary_error=lambda e: self.send(self._error(
+                        "summary_failed", f"Summary failed ({e.code}): {e.message} — use Retry Summary in the menu.")),
+                )
                 if action == "discard" and self.last_session == session_dir:
                     self.last_session = None
                 self.send({"type": "finalize_done", "session_id": session_id, "notes_path": str(notes) if notes else ""})
@@ -422,13 +492,21 @@ class EngineService:
                 log.exception("finalize failed")
                 self.send(self._error("finalize_failed", str(e)))
             finally:
-                self._call(self._set_state, "idle")
+                self._finalizing.discard(session_id)
+                self._call(self._finalize_finished)
 
         self._pool.submit(job)
 
+    def _finalize_finished(self) -> None:
+        if self.state == "postprocessing" and not self._finalizing:
+            self._set_state("idle")
+
     def _retry_summary(self, session_id: str) -> None:
+        session_dir = self._valid_session(session_id)
+        if session_dir is None:
+            self._send_now(self._error("no_session", f"Unknown session {session_id}"))
+            return
         notes = self.cfg.notes_dir / session_id
-        session_dir = self.cfg.sessions_dir / session_id
 
         def job() -> None:
             try:
@@ -460,7 +538,8 @@ def _setup_logging(log_dir: Path) -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
-    root.addHandler(logging.StreamHandler())
+    if os.isatty(2):  # under OnTrack.app stderr goes to a file; avoid logging everything twice
+        root.addHandler(logging.StreamHandler())
 
 
 def main(argv: list[str] | None = None) -> int:
