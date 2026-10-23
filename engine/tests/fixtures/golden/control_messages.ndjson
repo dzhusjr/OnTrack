@@ -1,0 +1,18 @@
+{"type":"ping","id":"p1"}
+{"type":"start_session","name":"Linear Algebra","session_id":null}
+{"type":"stop_session"}
+{"type":"ask","id":"q1","question":"What did she say about the deadline?"}
+{"type":"finalize","session_id":"2026-10-23-1405-linear-algebra","action":"save_all"}
+{"type":"retry_summary","session_id":"2026-10-23-1405-linear-algebra"}
+{"type":"enroll_start"}
+{"type":"set_config","config":{"tau":0.6}}
+{"type":"pong","id":"p1","state":"idle"}
+{"type":"status","state":"recording","model_ready":true,"session_id":"2026-10-23-1405-linear-algebra","degraded":false}
+{"type":"line","session_id":"2026-10-23-1405-linear-algebra","seq":0,"speaker":"Other","t_start":1.25,"t_end":3.5,"lang":"ru","text":"Привет всем"}
+{"type":"answer_delta","id":"q1","text":"She said "}
+{"type":"answer_done","id":"q1"}
+{"type":"session_stopped","session_id":"2026-10-23-1405-linear-algebra","duration_s":2820.5,"line_count":312}
+{"type":"finalize_progress","session_id":"2026-10-23-1405-linear-algebra","stage":"summarizing","pct":0.75}
+{"type":"finalize_done","session_id":"2026-10-23-1405-linear-algebra","notes_path":"/Users/dzhus/Desktop/Work/OnTrack/notes/2026-10-23-1405-linear-algebra"}
+{"type":"enroll_done","score":0.93}
+{"type":"error","code":"llm_missing","message":"Claude Code CLI not found","recoverable":true}
