@@ -3,6 +3,37 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "✗ Missing '$1' — $2"; exit 1; }; }
+SIGN_ID="OnTrack Local Signing"
+has_cert() { security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; }
+
+# One-time: a self-signed code-signing identity, so macOS keeps Microphone / Screen Recording
+# permissions across rebuilds (ad-hoc signatures change on every build).
+cert() {
+  if has_cert; then echo "✓ '$SIGN_ID' already exists"; return; fi
+  local tmp; tmp="$(mktemp -d)"
+  cat > "$tmp/cfg" <<'CFG'
+[req]
+distinguished_name=dn
+x509_extensions=ext
+prompt=no
+[dn]
+CN=OnTrack Local Signing
+[ext]
+basicConstraints=critical,CA:false
+keyUsage=critical,digitalSignature
+extendedKeyUsage=critical,codeSigning
+CFG
+  /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$tmp/cfg" \
+    -keyout "$tmp/key.pem" -out "$tmp/cert.pem" 2>/dev/null
+  /usr/bin/openssl pkcs12 -export -inkey "$tmp/key.pem" -in "$tmp/cert.pem" -name "$SIGN_ID" \
+    -out "$tmp/id.p12" -passout pass:ontrack
+  security import "$tmp/id.p12" -k ~/Library/Keychains/login.keychain-db -P ontrack -T /usr/bin/codesign
+  echo "→ macOS will ask for your login password to trust the certificate for code signing:"
+  security add-trusted-cert -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db "$tmp/cert.pem"
+  rm -rf "$tmp"
+  has_cert && echo "✓ created '$SIGN_ID'" || { echo "✗ certificate not trusted for code signing"; exit 1; }
+}
+
 has_xcode() { ! xcode-select -p 2>/dev/null | grep -q CommandLineTools && command -v xcodebuild >/dev/null 2>&1; }
 
 setup() {
@@ -62,16 +93,25 @@ app() {
 </dict>
 </plist>
 PLIST
-    codesign --force --sign - "$app"
+    if has_cert; then
+      codesign --force --sign "$SIGN_ID" "$app"
+    else
+      echo "• Signing ad-hoc — run 'scripts/dev.sh cert' once so permissions survive rebuilds."
+      codesign --force --sign - "$app"
+    fi
   fi
   echo "✓ installed ~/Applications/OnTrack.app"
 }
 
 case "${1:-all}" in
   setup) setup ;;
+  cert) cert ;;
+  reset-permissions)
+    tccutil reset Microphone com.romandzhus.ontrack
+    tccutil reset ScreenCapture com.romandzhus.ontrack ;;
   test) test_all ;;
   app) app ;;
   run) open ~/Applications/OnTrack.app ;;
-  all) setup; test_all; app; open ~/Applications/OnTrack.app ;;
-  *) echo "usage: scripts/dev.sh [setup|test|app|run|all]"; exit 2 ;;
+  all) setup; cert; test_all; app; open ~/Applications/OnTrack.app ;;
+  *) echo "usage: scripts/dev.sh [setup|cert|test|app|run|reset-permissions|all]"; exit 2 ;;
 esac
