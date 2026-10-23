@@ -60,3 +60,26 @@ class FakeAsr:
     def run(self, samples, language, initial_prompt):
         self.calls.append((language, initial_prompt))
         return self._current[1]
+
+
+# ---- Task 6: speaker embeddings -----------------------------------------
+from datetime import datetime  # noqa: E402
+
+ME_VP = np.array([1.0, 0.0, 0.0])
+NOW = datetime(2026, 10, 23, 14, 5)
+
+
+class FakeEmbedder:
+    """Embeds by signal amplitude: 0.3 → 'me' axis, 0.5 → 'other' axis, else a third axis."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def embed(self, samples):
+        self.calls += 1
+        amp = round(float(np.max(np.abs(samples))), 1) if len(samples) else 0.0
+        if amp == 0.3:
+            return np.array([1.0, 0.0, 0.0])
+        if amp == 0.5:
+            return np.array([0.0, 1.0, 0.0])
+        return np.array([0.0, 0.0, 1.0])
