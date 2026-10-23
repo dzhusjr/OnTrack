@@ -1,0 +1,31 @@
+[project]
+name = "ontrack"
+version = "0.1.0"
+description = "OnTrack realtime transcription engine"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2", "soundfile>=0.12", "soxr>=0.5"]
+
+[project.optional-dependencies]
+models = [
+  "mlx-whisper>=0.4; sys_platform == 'darwin'",
+  "silero-vad>=5.1",
+  "pyannote.audio>=3.3",
+]
+
+[project.scripts]
+ontrack = "ontrack.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ontrack"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+markers = ["models: needs real ML models (Mac only)"]
