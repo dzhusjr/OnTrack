@@ -16,9 +16,11 @@ import numpy as np
 from .config import Config
 from .hallucination import is_hallucination
 from .recorder import load_channel
-from .session import read_lines
+from .segmenter import Segmenter
+from .session import paused_ranges, read_lines
+from .speaker import SpeakerLabeler
 from .speaker import Embedder, cosine
-from .types import SAMPLE_RATE, Channel, Speaker, Utterance
+from .types import SAMPLE_RATE, AudioFrame, Channel, Speaker, Utterance
 
 log = logging.getLogger(__name__)
 _MAX_CLUSTER_AUDIO_S = 30.0
@@ -113,6 +115,7 @@ def postprocess(
     cfg: Config,
     progress: Callable[[str, float], None] | None = None,
     on_warning: Callable[[str], None] | None = None,
+    vad_factory: Callable[[], object] | None = None,
 ) -> list[FinalLine]:
     session_dir = Path(session_dir)
     report = progress or (lambda stage, pct: None)
@@ -138,8 +141,21 @@ def postprocess(
             if on_warning:
                 on_warning(msg)
 
+    paused = paused_ranges(session_dir)
+    offline_ok = bool(paused) and transcriber is not None and vad_factory is not None
+
+    def mic_label(u: Utterance) -> str:
+        if segments:
+            cluster = _best_cluster(segments, u.t_start, u.t_end)
+            if cluster is not None:
+                return names.get(cluster, Speaker.OTHER.value)
+        return SpeakerLabeler(embedder, voiceprint, cfg).label(u).value
+
     if segments and transcriber is not None and cfg.retranscribe:
         final = _rebuild_by_turns(lines, segments, names, mic, system, transcriber, report)
+        if offline_ok:  # mic speech is already covered by the speaker turns; add call audio from paused stretches
+            final = _renumber(final + _offline(paused, Channel.SYSTEM, system, transcriber, vad_factory, cfg,
+                                               lambda u: Speaker.THEM.value))
         _write_final(session_dir, final)
         return final
 
@@ -167,8 +183,46 @@ def postprocess(
                 final[i] = FinalLine(fl.seq, fl.speaker, fl.t_start, fl.t_end, t.lang, t.text.strip())
         report("retranscribing", 1.0)
 
+    if offline_ok:
+        report("transcribing paused parts", 0.0)
+        final = _renumber(
+            final
+            + _offline(paused, Channel.MIC, mic, transcriber, vad_factory, cfg, mic_label)
+            + _offline(paused, Channel.SYSTEM, system, transcriber, vad_factory, cfg, lambda u: Speaker.THEM.value)
+        )
     _write_final(session_dir, final)
     return final
+
+
+def _renumber(lines: list[FinalLine]) -> list[FinalLine]:
+    ordered = sorted(lines, key=lambda l: (l.t_start, l.t_end))
+    return [FinalLine(i, l.speaker, l.t_start, l.t_end, l.lang, l.text) for i, l in enumerate(ordered)]
+
+
+def _offline(ranges, channel: Channel, audio: np.ndarray, transcriber, vad_factory, cfg: Config,
+             label: Callable[[Utterance], str]) -> list[FinalLine]:
+    """Find and transcribe speech inside stretches where live transcription was paused."""
+    out: list[FinalLine] = []
+    step = 320
+    for t0, t1 in ranges:
+        x = _span(audio, t0, t1)
+        if len(x) < SAMPLE_RATE // 4:
+            continue
+        seg = Segmenter(channel, vad_factory(), cfg, origin_ns=0)
+        utts: list[Utterance] = []
+        base = int(round(t0 * SAMPLE_RATE))
+        for i in range(0, len(x), step):
+            chunk = x[i : i + step]
+            if len(chunk) < step:
+                chunk = np.concatenate([chunk, np.zeros(step - len(chunk), np.float32)])
+            utts += seg.push(AudioFrame(channel, (base + i) * 1_000_000_000 // SAMPLE_RATE, chunk))
+        utts += seg.flush()
+        for u in utts:
+            t = transcriber.transcribe(u)
+            text = t.text.strip()
+            if text and not is_hallucination(t, duration=u.duration):
+                out.append(FinalLine(0, label(u), u.t_start, u.t_end, t.lang, text))
+    return out
 
 
 def _rebuild_by_turns(lines, turns, names, mic, system, transcriber, report) -> list[FinalLine]:

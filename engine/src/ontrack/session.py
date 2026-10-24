@@ -57,6 +57,11 @@ def _valid_prefix(path: Path) -> tuple[list[Line], int]:
     return lines, valid
 
 
+def paused_ranges(session_dir: Path) -> list[tuple[float, float]]:
+    meta = json.loads((Path(session_dir) / "meta.json").read_text(encoding="utf-8"))
+    return [(float(a), float(b)) for a, b in meta.get("paused", [])]
+
+
 def read_lines(session_dir: Path) -> list[Line]:
     return _valid_prefix(Path(session_dir) / "transcript.jsonl")[0]
 
@@ -80,6 +85,11 @@ class SessionWriter:
     @property
     def origin_ns(self) -> int | None:
         return self._meta.get("origin_ns")
+
+    def add_paused(self, t_start: float, t_end: float) -> None:
+        """Record a stretch where live transcription was off (audio was still recorded)."""
+        self._meta.setdefault("paused", []).append([round(t_start, 3), round(t_end, 3)])
+        _write_atomic(self._dir / "meta.json", json.dumps(self._meta, ensure_ascii=False, indent=2))
 
     def set_origin(self, origin_ns: int) -> None:
         self._meta["origin_ns"] = origin_ns

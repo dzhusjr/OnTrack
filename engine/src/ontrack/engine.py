@@ -97,6 +97,8 @@ class EngineService:
         self._resume_last_s: float | None = None
         self.dropped_frames = 0
         self._dropping_since: float | None = None
+        self.live = True  # live transcription on; audio is recorded either way
+        self._pause_start: float | None = None
 
     # ---- paths ------------------------------------------------------------------
     def _audio_dir(self, session_id: str) -> Path:
@@ -181,7 +183,7 @@ class EngineService:
         self._send_now({
             "type": "status", "state": self.state, "model_ready": self.model_ready,
             "session_id": self.writer.id if self.writer and self.state in ("recording", "stopping") else None,
-            "degraded": self.degraded,
+            "degraded": self.degraded, "live": self.live,
         })
 
     def _set_state(self, state: str) -> None:
@@ -254,6 +256,8 @@ class EngineService:
             else:
                 self._enroll = []
                 self._set_state("enrolling")
+        elif t == "set_live":
+            self._set_live(bool(msg["enabled"]))
         elif t == "set_config":
             try:
                 self.cfg = apply_overrides(self.cfg, msg["config"])
@@ -295,9 +299,40 @@ class EngineService:
         self.degraded = False
         self.dropped_frames = 0
         self._dropping_since = None
+        self.live = True
+        self._pause_start = None
         self._set_state("recording")
 
+    def _session_now(self) -> float | None:
+        if not self._last_t or self.writer is None or self.writer.origin_ns is None:
+            return None
+        return (max(self._last_t.values()) - self.writer.origin_ns) / 1e9
+
+    def _set_live(self, enabled: bool) -> None:
+        if enabled == self.live:
+            self._send_status()
+            return
+        self.live = enabled
+        if self.state == "recording" and self.writer is not None:
+            now = self._session_now()
+            if not enabled:
+                self._pause_start = now if now is not None else 0.0
+                self._work.put(("flush", None))  # finish the phrase in progress
+            elif self._pause_start is not None:
+                end = now if now is not None else self._pause_start
+                self.writer.add_paused(self._pause_start, end)
+                self._work.put(("note", (self._pause_start,
+                                         f"[live transcription paused {_mmss(end - self._pause_start)}]")))
+                self._pause_start = None
+        log.info("live transcription %s", "on" if enabled else "off")
+        self._send_status()
+
     async def _stop_session(self, notify: bool) -> None:
+        if not self.live and self._pause_start is not None and self.writer is not None:
+            end = self._session_now() or self._pause_start
+            self.writer.add_paused(self._pause_start, end)
+            self._work.put(("note", (self._pause_start, f"[live transcription paused {_mmss(end - self._pause_start)}]")))
+            self._pause_start = None
         self._set_state("stopping")
         fut: concurrent.futures.Future = concurrent.futures.Future()
         self._work.put(("stop", fut))
@@ -380,6 +415,8 @@ class EngineService:
             self.recorder.write(f)
         except Exception:
             log.exception("audio recording failed (disk full?) — transcript continues")
+        if not self.live:
+            return  # recording only: audio is saved above and transcribed when the session is saved
         if self._work.qsize() >= int(self.cfg.max_backlog_s * 50):
             # transcription is too far behind: skip live audio (it is still recorded for post-processing)
             self.dropped_frames += 1
@@ -412,6 +449,9 @@ class EngineService:
                     t, text = item
                     line = self.writer.append(Speaker.NOTE, t, t, "", text)
                     self.send(self._line_msg(line))
+                elif kind == "flush":
+                    if self.pipeline is not None:
+                        self.pipeline.finish()
                 elif kind == "stop":
                     try:
                         if self.pipeline is not None:
@@ -484,7 +524,7 @@ class EngineService:
         transcriber = Transcriber(self.final_asr, self.cfg) if self.cfg.retranscribe else None
         deps = FinalizeDeps(self.diarizer, self.backends.embedder,
                             load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy"),
-                            transcriber, self.runner, self.cfg)
+                            transcriber, self.runner, self.cfg, vad_factory=self.backends.vad_factory)
 
         def job() -> None:
             try:

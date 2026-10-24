@@ -16,6 +16,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "retry_summary": ("session_id",),
     "enroll_start": (),
     "set_config": ("config",),
+    "set_live": ("enabled",),  # live transcription on/off; audio keeps recording either way
     # engine -> app
     "pong": ("state",),
     "status": ("state", "model_ready", "session_id", "degraded"),

@@ -58,3 +58,13 @@ def test_close_sets_ended_at(tmp_path):
     w = SessionWriter.start(tmp_path, "S", NOW)
     w.close(datetime(2026, 10, 23, 15, 0))
     assert json.loads((w.dir / "meta.json").read_text())["ended_at"] == "2026-10-23T15:00:00"
+
+
+def test_paused_ranges_persist_in_meta(tmp_path):
+    from ontrack.session import paused_ranges
+
+    w = SessionWriter.start(tmp_path, "S", NOW)
+    w.add_paused(10.0, 70.5)
+    w.add_paused(100.0, 130.0)
+    assert paused_ranges(w.dir) == [(10.0, 70.5), (100.0, 130.0)]
+    assert paused_ranges(SessionWriter.resume(w.dir).dir) == [(10.0, 70.5), (100.0, 130.0)]

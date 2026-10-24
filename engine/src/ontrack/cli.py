@@ -100,7 +100,8 @@ def _finalize_cmd(args, backends: Backends | None, diarizer, runner) -> int:
 
         final_asr = MlxWhisperBackend(cfg.final_whisper_model)
     deps = FinalizeDeps(diarizer, backends.embedder, load_voiceprint(cfg.app_support_dir / "voiceprint.npy"),
-                        Transcriber(final_asr, cfg) if cfg.retranscribe else None, runner, cfg)
+                        Transcriber(final_asr, cfg) if cfg.retranscribe else None, runner, cfg,
+                        vad_factory=backends.vad_factory)
     notes = finalize(session_dir, cfg.app_support_dir / "audio" / args.session_id, args.action, deps,
                      lambda stage, pct: print(f"  {stage} {pct:.0%}", flush=True),
                      on_summary_error=lambda e: print(f"! summary failed ({e.code}): {e.message}", file=sys.stderr),

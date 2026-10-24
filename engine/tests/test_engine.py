@@ -425,3 +425,38 @@ def test_finalize_retranscribes_with_the_final_model(dirs):
         await c.close()
 
     asyncio.run(run_with(svc, body))
+
+
+def test_live_transcription_can_be_paused_while_audio_keeps_recording(dirs):
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("first")), ({"en": 1}, tr("after resume"))])
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        assert st.get("live") is True
+        await c.audio(frames(SPEECH, Channel.MIC))
+        await c.expect(lambda m: m["type"] == "line" and m["text"] == "first")
+        await c.send({"type": "set_live", "enabled": False})
+        await c.expect(lambda m: m["type"] == "status" and m.get("live") is False)
+        await c.audio(frames(SPEECH, Channel.MIC, start_ns=2_500_000_000))  # recorded, not transcribed
+        await c.audio(frames(silence(10.0), Channel.MIC, start_ns=5_000_000_000))
+        await asyncio.sleep(0.5)  # audio and control are separate sockets: let the paused audio arrive first
+        await c.send({"type": "set_live", "enabled": True})
+        await c.expect(lambda m: m["type"] == "status" and m.get("live") is True)
+        await c.audio(frames(SPEECH, Channel.MIC, start_ns=15_000_000_000))
+        note = await c.expect(lambda m: m["type"] == "line" and m["speaker"] == "Note")
+        assert note["text"].startswith("[live transcription paused")
+        line = await c.expect(lambda m: m["type"] == "line" and m["speaker"] != "Note")
+        assert line["text"] == "after resume"
+        await c.send({"type": "stop_session"})
+        await c.expect(typ("session_stopped"))
+        from ontrack.recorder import load_channel
+        from ontrack.session import paused_ranges
+
+        assert len(load_channel(cfg.app_support_dir / "audio" / st["session_id"], Channel.MIC)) >= 17 * 16000
+        (t0, t1), = paused_ranges(cfg.sessions_dir / st["session_id"])
+        assert t0 == pytest.approx(2.5, abs=0.1) and t1 == pytest.approx(15.0, abs=0.1)
+        await c.close()
+
+    asyncio.run(run_with(svc, body))

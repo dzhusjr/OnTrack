@@ -1,5 +1,5 @@
 import numpy as np
-from fakes import ME_VP, NOW, FakeAsr, FakeEmbedder, frames, silence, tone, tr
+from fakes import ME_VP, NOW, EnergyVad, FakeAsr, FakeEmbedder, frames, silence, tone, tr
 
 from ontrack.config import load_config
 from ontrack.postprocess import FinalLine, postprocess, read_final_lines
@@ -109,3 +109,40 @@ def test_diarization_failure_is_reported(tmp_path):
     postprocess(w.dir, tmp_path / "audio", FakeDiarizer(error=RuntimeError("403 gated repo")), FakeEmbedder(), ME_VP,
                 None, load_config(None), on_warning=warnings.append)
     assert warnings and "403" in warnings[0]
+
+
+def setup_paused(tmp_path):
+    """Live line at 0-1 s; transcription paused 1.5-9 s while the mic (2-4 s) and a call (6-8 s) were still recorded."""
+    w = SessionWriter.start(tmp_path / "sessions", "S", NOW)
+    rec = AudioRecorder(tmp_path / "audio", origin_ns=0)
+    for f in frames(np.concatenate([tone(1, 0.3), silence(1), tone(2, 0.3), silence(6)]), Channel.MIC):
+        rec.write(f)
+    for f in frames(np.concatenate([silence(6), tone(2, 0.5), silence(2)]), Channel.SYSTEM):
+        rec.write(f)
+    rec.close()
+    w.append(Speaker.ME, 0, 1, "en", "before pause")
+    w.add_paused(1.5, 9.0)
+    w.append(Speaker.NOTE, 1.5, 1.5, "", "[live transcription paused 00:07]")
+    return w
+
+
+def test_paused_ranges_are_transcribed_when_saving(tmp_path):
+    w = setup_paused(tmp_path)
+    asr = FakeAsr([({"en": 1}, tr("before pause final")), ({"en": 1}, tr("said while paused")),
+                   ({"en": 1}, tr("call while paused"))])
+    out = postprocess(w.dir, tmp_path / "audio", FakeDiarizer(error=RuntimeError("no")), FakeEmbedder(), ME_VP,
+                      Transcriber(asr, load_config(None)), load_config(None), vad_factory=EnergyVad)
+    got = [(l.speaker, l.text) for l in out]
+    assert ("Me", "said while paused") in got and ("Them", "call while paused") in got
+    assert [l.t_start for l in out] == sorted(l.t_start for l in out)
+    assert [l.seq for l in out] == list(range(len(out)))
+
+
+def test_paused_call_audio_transcribed_with_speaker_turns(tmp_path):
+    w = setup_paused(tmp_path)
+    asr = FakeAsr([({"en": 1}, tr("before")), ({"en": 1}, tr("mic turn")), ({"en": 1}, tr("call while paused"))])
+    segs = [(0.0, 1.0, "S1"), (2.0, 4.0, "S1")]
+    out = postprocess(w.dir, tmp_path / "audio", FakeDiarizer(segs), FakeEmbedder(), ME_VP,
+                      Transcriber(asr, load_config(None)), load_config(None), vad_factory=EnergyVad)
+    got = [(l.speaker, l.text) for l in out]
+    assert ("Me", "mic turn") in got and ("Them", "call while paused") in got

@@ -27,6 +27,7 @@ class FinalizeDeps:
     transcriber: object | None
     runner: object
     cfg: Config
+    vad_factory: object | None = None  # for transcribing stretches where live transcription was paused
 
 
 def _copy_if(src: Path, dst: Path) -> None:
@@ -54,7 +55,8 @@ def finalize(
 
     try:
         postprocess(session_dir, audio_dir, deps.diarizer, deps.embedder, deps.voiceprint, deps.transcriber,
-                    deps.cfg, progress=lambda s, p: progress(s, 0.05 + 0.6 * p), on_warning=on_warning)
+                    deps.cfg, progress=lambda s, p: progress(s, 0.05 + 0.6 * p), on_warning=on_warning,
+                    vad_factory=deps.vad_factory)
     except Exception as e:  # never lose the transcript because post-processing broke
         log.exception("post-processing failed: %s", e)
 
