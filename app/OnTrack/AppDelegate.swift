@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleWaitForPower: { [weak self] in
                 guard let self else { return }
                 self.settings.waitForPowerToFinalize.toggle()
+                if !self.settings.waitForPowerToFinalize, !self.queue.items.isEmpty {
+                    self.store.showToast("Finishing \(self.queue.items.count) waiting session(s) now")
+                }
                 self.processQueue(force: false)
             },
             waitForPower: { [weak self] in self?.settings.waitForPowerToFinalize ?? false },
