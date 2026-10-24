@@ -14,9 +14,41 @@ struct OverlayView: View {
     private var s: OverlayState { store.state }
 
     var body: some View {
+        if s.mode == .mini {
+            miniPill
+        } else {
+            fullView
+        }
+    }
+
+    /// Shown instead of nothing when you hide the bar during a recording — the menu-bar icon may be hidden by the notch.
+    private var miniPill: some View {
+        HStack(spacing: 6) {
+            Circle().fill(Color.red).frame(width: 8, height: 8)
+            if let start = store.recordingStarted {
+                TimelineView(.periodic(from: start, by: 1)) { ctx in
+                    Text(Self.elapsed(from: start, to: ctx.date))
+                        .font(.system(size: 11, design: .monospaced))
+                }
+            }
+            if !s.liveTranscription {
+                Image(systemName: "text.bubble.fill").font(.system(size: 9)).foregroundStyle(.orange)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(OverlayBackground())
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
+        .contentShape(Capsule())
+        .onTapGesture { store.send(.toggle) }
+        .help("OnTrack is recording — click or press ⌥Space to show the live bar")
+    }
+
+    private var fullView: some View {
         VStack(alignment: .leading, spacing: 10) {
             switch s.mode {
-            case .hidden:
+            case .hidden, .mini:
                 EmptyView()
             case .collapsed, .expanded:
                 liveSection

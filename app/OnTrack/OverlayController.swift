@@ -76,7 +76,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
     private func layout() {
         // Measure the SwiftUI content explicitly (fittingSize is 0×0 when the hosting view doesn't self-size).
         var size = hosting.sizeThatFits(in: NSSize(width: 560, height: 2000))
-        if size.width < 100 || size.height < 20 { size = NSSize(width: 560, height: max(size.height, 64)) }
+        if size.width < 10 || size.height < 10 { size = NSSize(width: 560, height: max(size.height, 64)) }
         let top: NSPoint
         if positioned {
             top = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)  // keep the top edge; grow downward
