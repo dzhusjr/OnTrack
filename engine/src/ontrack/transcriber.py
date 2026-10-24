@@ -7,6 +7,7 @@ from typing import Protocol
 import numpy as np
 
 from .config import Config
+from .hallucination import normalize
 from .types import Channel, Transcript, Utterance
 
 
@@ -41,7 +42,9 @@ class Transcriber:
     def _ctx(self, channel: Channel) -> deque[tuple[str | None, str]]:
         return self._context.setdefault(channel, deque(maxlen=8))
 
-    def _prompt(self, channel: Channel, lang: str) -> str | None:
+    def _prompt(self, channel: Channel, lang: str, duration: float = 99.0) -> str | None:
+        if duration < 1.0:
+            return None  # on sub-second audio a prompt mostly makes Whisper repeat the prompt
         # only same-language context: a Russian prompt pushes English speech into Russian
         same = [t for l, t in self._ctx(channel) if l is None or l == lang][-self.cfg.context_lines :]
         parts = [ANCHOR_PROMPTS[lang]] if lang in ANCHOR_PROMPTS else []
@@ -52,9 +55,13 @@ class Transcriber:
 
     def _run(self, samples, lang: str, prompt: str | None) -> Transcript:
         t = self.backend.run(samples, lang, prompt)
-        text = t.text.strip()
-        if prompt and len(text) > 15 and text in prompt:  # Whisper echoed its prompt on silence/noise
-            return Transcript("", t.lang, t.avg_logprob, t.no_speech_prob, t.compression_ratio)
+        norm = normalize(t.text)
+        if prompt and norm:
+            anchor = normalize(ANCHOR_PROMPTS.get(lang, ""))
+            words = len(norm.split())  # a real single "Hello." must survive; "Hello, welcome." / "Let's begin." must not
+            echoed = (anchor and words >= 2 and norm in anchor) or (words >= 4 and norm in normalize(prompt))
+            if echoed:  # Whisper repeated (part of) its prompt on silence/noise
+                return Transcript("", t.lang, t.avg_logprob, t.no_speech_prob, t.compression_ratio)
         return t
 
     def transcribe(self, u: Utterance) -> Transcript:
@@ -64,7 +71,7 @@ class Transcriber:
         candidates = ranked[:1] if probs.get(ranked[0], 0.0) >= CONFIDENT or len(ranked) < 2 else ranked[:2]
         if "ru" in candidates and "uk" in allowed and "uk" not in candidates:
             candidates.append("uk")
-        results = [(l, self._run(u.samples, l, self._prompt(u.channel, l))) for l in candidates]
+        results = [(l, self._run(u.samples, l, self._prompt(u.channel, l, u.duration))) for l in candidates]
         results = [(l, t) for l, t in results if t.text.strip()] or results
         best_lp = max(t.avg_logprob for _, t in results)
         close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - self.cfg.lang_tie_margin]
@@ -79,7 +86,7 @@ class Transcriber:
             probs = self.backend.detect_language(u.samples)
             allowed = list(self.cfg.allowed_langs)
             lang = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))[0]
-        return self._run(u.samples, lang, self._prompt(u.channel, lang))
+        return self._run(u.samples, lang, self._prompt(u.channel, lang, u.duration))
 
     def remember(self, channel: Channel, text: str, lang: str | None = None) -> None:
         self._ctx(channel).append((lang, text))

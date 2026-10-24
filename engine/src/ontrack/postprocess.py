@@ -161,7 +161,7 @@ def postprocess(
             if len(audio) < SAMPLE_RATE // 4:
                 continue
             t = transcriber.transcribe(Utterance(channel, fl.t_start, fl.t_end, audio))
-            if not is_hallucination(t):
+            if not is_hallucination(t, duration=fl.t_end - fl.t_start):
                 final[i] = FinalLine(fl.seq, fl.speaker, fl.t_start, fl.t_end, t.lang, t.text.strip())
         report("retranscribing", 1.0)
 
@@ -182,7 +182,7 @@ def _rebuild_by_turns(lines, turns, names, mic, system, transcriber, report) -> 
         if len(audio) < SAMPLE_RATE // 4:
             continue
         t = transcriber.transcribe(Utterance(Channel.MIC, t0, t1, audio))
-        if t.text.strip() and not is_hallucination(t):
+        if t.text.strip() and not is_hallucination(t, duration=t1 - t0):
             out.append(FinalLine(0, names.get(label, Speaker.OTHER.value), t0, t1, t.lang, t.text.strip()))
     for line in lines:
         if line.speaker == Speaker.THEM:
@@ -192,7 +192,7 @@ def _rebuild_by_turns(lines, turns, names, mic, system, transcriber, report) -> 
             audio = _span(system, line.t_start, line.t_end)
             if len(audio) >= SAMPLE_RATE // 4:
                 t = transcriber.transcribe(Utterance(Channel.SYSTEM, line.t_start, line.t_end, audio))
-                if t.text.strip() and not is_hallucination(t):
+                if t.text.strip() and not is_hallucination(t, duration=line.t_end - line.t_start):
                     text, lang = t.text.strip(), t.lang
             out.append(FinalLine(0, line.speaker.value, line.t_start, line.t_end, lang, text))
         elif line.speaker == Speaker.NOTE:

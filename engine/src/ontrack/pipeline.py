@@ -9,7 +9,7 @@ import numpy as np
 
 from .config import Config
 from .echo import EchoFilter
-from .hallucination import is_hallucination
+from .hallucination import is_hallucination, normalize
 from .segmenter import Segmenter
 from .session import SessionWriter
 from .speaker import Embedder, SpeakerLabeler
@@ -85,6 +85,7 @@ class Pipeline:
         self._fallback_asr = fallback_asr
         self._degraded = False
         self._held: list[Utterance] = []  # mic utterances waiting for overlapping system audio
+        self._last_text: dict[Channel, tuple[str, float]] = {}  # channel -> (normalized text, t_end)
         self.on_partial = on_partial
         self._preview_at: dict[Channel, tuple[float, float]] = {}  # channel -> (utterance start, position)
         self._origin: int | None = writer.origin_ns  # resumed sessions keep their time origin
@@ -170,13 +171,18 @@ class Pipeline:
             self.on_partial(u.channel, u.t_start, "")  # the final line (or nothing) replaces the preview
         t0 = time.perf_counter()
         t = self.transcriber.transcribe(u)
-        if is_hallucination(t):
+        if is_hallucination(t, duration=u.duration):
             return
         text = t.text.strip()
+        norm = normalize(text)
+        prev = self._last_text.get(u.channel)
+        if prev and u.duration < 1.5 and norm == prev[0] and u.t_start - prev[1] < 10.0:
+            return  # the same short phrase again right away: repeated hallucination
         speaker = self.labeler.label(u)
         if self.echo.is_echo(speaker, u.t_start, u.t_end, text):
             return
         line = self.writer.append(speaker, u.t_start, u.t_end, t.lang, text)
+        self._last_text[u.channel] = (norm, u.t_end)
         self.transcriber.remember(u.channel, text, t.lang)
         self.echo.observe(line)
         self.latencies.append(time.perf_counter() - t0)

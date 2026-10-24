@@ -74,3 +74,15 @@ def test_ukrainian_decode_gets_ukrainian_anchor_prompt_without_context():
     asr = LangAsr({"uk": 0.99}, {"uk": ("привіт", -0.2)})
     Transcriber(asr, load_config(None)).transcribe(utt())
     assert asr.calls[0] == ("uk", ANCHOR_PROMPTS["uk"])
+
+
+def test_fragment_of_the_prompt_is_dropped():  # "Hello, welcome." / "Let's..." echoed on near-silence
+    for echo in ["Hello, welcome.", "Let's...", "Let's begin."]:
+        asr = LangAsr({"en": 0.99}, {"en": (echo, -0.3)})
+        assert Transcriber(asr, load_config(None)).transcribe(utt()).text == "", echo
+
+
+def test_short_utterances_get_no_prompt():  # prompts make Whisper invent text on sub-second blips
+    asr = LangAsr({"en": 0.99}, {"en": ("Yes.", -0.2)})
+    t = Transcriber(asr, load_config(None)).transcribe(utt(t_start=0.0, t_end=0.6))
+    assert t.text == "Yes." and asr.calls[0][1] is None

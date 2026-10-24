@@ -166,3 +166,11 @@ def test_mic_released_when_system_audio_stalls(tmp_path):  # review M2 #4
     for f in frames(np.concatenate([tone(1.5, 0.5), silence(6.0)]), Channel.MIC):
         p.process(f)
     assert [l.text for l in seen] == ["still hear you"]  # released before finish()
+
+
+def test_repeated_short_line_is_dropped(tmp_path):  # "See you soon." twice in a row from noise
+    p, w = make(tmp_path, [({"en": 1}, tr("see you soon")), ({"en": 1}, tr("see you soon"))])
+    for f in frames(np.concatenate([tone(1.0), silence(1.0), tone(1.0), silence(1.0)]), Channel.MIC):
+        p.process(f)
+    p.finish()
+    assert [l.text for l in read_lines(w.dir)] == ["see you soon"]
