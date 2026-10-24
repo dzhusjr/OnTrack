@@ -26,6 +26,12 @@ struct Settings {
         return v == 0 ? 3 : max(1, min(5, v))
     }
 
+    /// Extra folder every saved session is copied to (e.g. a course folder or iCloud Drive). nil = off.
+    var exportFolder: URL? {
+        get { defaults.string(forKey: "exportFolder").map { URL(fileURLWithPath: $0, isDirectory: true) } }
+        nonmutating set { defaults.set(newValue?.path, forKey: "exportFolder") }
+    }
+
     var autoShowOverlay: Bool {
         get { defaults.object(forKey: "autoShowOverlay") as? Bool ?? true }
         nonmutating set { defaults.set(newValue, forKey: "autoShowOverlay") }

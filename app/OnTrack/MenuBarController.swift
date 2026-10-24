@@ -13,6 +13,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var openLogs: () -> Void
         var openConfig: () -> Void
         var toggleAutoShow: () -> Void
+        var chooseExportFolder: () -> Void
+        var clearExportFolder: () -> Void
+        var exportFolderName: () -> String?
         var autoShow: () -> Bool
         var quit: () -> Void
     }
@@ -78,6 +81,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         add(menu, "Open Sessions Folder", #selector(openSessions))
         add(menu, "Open Notes Folder", #selector(openNotes))
+        if let name = actions.exportFolderName() {
+            add(menu, "Also Saving Notes to “\(name)” — Change…", #selector(chooseExportFolder))
+            add(menu, "Stop Saving Notes to “\(name)”", #selector(clearExportFolder))
+        } else {
+            add(menu, "Also Save Notes To…", #selector(chooseExportFolder))
+        }
         add(menu, "Open Logs", #selector(openLogs))
         add(menu, "Edit Engine Config…", #selector(openConfig))
         menu.addItem(.separator())
@@ -106,5 +115,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openLogs() { actions.openLogs() }
     @objc private func openConfig() { actions.openConfig() }
     @objc private func toggleAutoShow() { actions.toggleAutoShow() }
+    @objc private func chooseExportFolder() { actions.chooseExportFolder() }
+    @objc private func clearExportFolder() { actions.clearExportFolder() }
     @objc private func quit() { actions.quit() }
 }

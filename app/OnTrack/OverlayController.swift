@@ -35,9 +35,11 @@ final class OverlayController: NSObject, NSWindowDelegate {
     private var positioned = false  // false until the panel has been placed at its saved/default spot
     private static let positionKey = "overlayTopLeft"
 
-    init(store: OverlayStore, onOpenNotes: @escaping (String) -> Void, onOpenSettings: @escaping (String) -> Void) {
+    init(store: OverlayStore, onOpenNotes: @escaping (String) -> Void, onOpenSettings: @escaping (String) -> Void,
+         onSaveTo: @escaping (String) -> Void) {
         self.store = store
-        hosting = NSHostingController(rootView: OverlayView(store: store, onOpenNotes: onOpenNotes, onOpenSettings: onOpenSettings))
+        hosting = NSHostingController(rootView: OverlayView(store: store, onOpenNotes: onOpenNotes,
+                                                            onOpenSettings: onOpenSettings, onSaveTo: onSaveTo))
         hosting.sizingOptions = []  // the controller sizes the panel (top edge fixed); avoid fighting it
         panel = OverlayPanel(contentView: hosting.view)
         super.init()

@@ -7,6 +7,7 @@ struct OverlayView: View {
     @ObservedObject var store: OverlayStore
     var onOpenNotes: (String) -> Void
     var onOpenSettings: (String) -> Void
+    var onSaveTo: (String) -> Void
     @FocusState private var questionFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -174,6 +175,7 @@ struct OverlayView: View {
             Spacer()
             if let path = s.notesPath {
                 Button("Open") { onOpenNotes(path) }
+                Button("Save to…") { onSaveTo(path) }
             }
             Button("Close") { store.send(.dismiss) }
         }

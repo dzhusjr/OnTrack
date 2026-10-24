@@ -24,7 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         overlay = OverlayController(store: store,
                                     onOpenNotes: { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) },
-                                    onOpenSettings: { $0 == "mic" ? Permissions.openMicrophoneSettings() : Permissions.openScreenCaptureSettings() })
+                                    onOpenSettings: { $0 == "mic" ? Permissions.openMicrophoneSettings() : Permissions.openScreenCaptureSettings() },
+                                    onSaveTo: { [weak self] in self?.saveTo(notesPath: $0) })
         menu = MenuBarController(actions: .init(
             startStop: { [weak self] in self?.toggleRecording(askName: true) },
             toggleOverlay: { [weak self] in self?.store.send(.toggle) },
@@ -40,6 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.store.setAutoShow(self.settings.autoShowOverlay)
             },
             autoShow: { [weak self] in self?.settings.autoShowOverlay ?? true },
+            chooseExportFolder: { [weak self] in
+                guard let self, let folder = Self.pickFolder(title: "Also save every session's notes to…",
+                                                             start: self.settings.exportFolder) else { return }
+                self.settings.exportFolder = folder
+                self.store.showToast("New sessions will also be saved to “\(folder.lastPathComponent)”")
+            },
+            clearExportFolder: { [weak self] in self?.settings.exportFolder = nil },
+            exportFolderName: { [weak self] in self?.settings.exportFolder?.lastPathComponent },
             quit: { NSApp.terminate(nil) }
         ))
 
@@ -123,8 +132,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .error(err):
             if enrolling && err.code == "enroll_failed" { finishEnrollment() }
             if err.code == "summary_failed" { pendingSummarySessionId = lastFinalizeSessionId }
-        case let .finalizeDone(sid, _):
+        case let .finalizeDone(sid, path):
             if sid == pendingSummarySessionId { pendingSummarySessionId = nil }
+            if !path.isEmpty, let folder = settings.exportFolder {
+                export(notesPath: path, to: folder)
+            }
         default:
             break
         }
@@ -200,6 +212,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finishEnrollment() {
         enrolling = false
         capture.stop()
+    }
+
+    // MARK: save to…
+
+    private func saveTo(notesPath: String) {
+        let start = UserDefaults.standard.string(forKey: "lastSaveToFolder").map { URL(fileURLWithPath: $0) }
+            ?? settings.exportFolder
+        guard let folder = Self.pickFolder(title: "Save transcript and summary to…", start: start) else { return }
+        UserDefaults.standard.set(folder.path, forKey: "lastSaveToFolder")
+        export(notesPath: notesPath, to: folder)
+    }
+
+    private func export(notesPath: String, to folder: URL) {
+        do {
+            let dest = try NotesExporter.export(notesDir: URL(fileURLWithPath: notesPath, isDirectory: true), into: folder)
+            store.showToast("Saved to \(dest.deletingLastPathComponent().lastPathComponent)/\(dest.lastPathComponent)")
+        } catch {
+            store.showIssue("Couldn't save to \(folder.path): \(error.localizedDescription)")
+        }
+    }
+
+    private static func pickFolder(title: String, start: URL?) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.prompt = "Save Here"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        if let start { panel.directoryURL = start }
+        NSApp.activate(ignoringOtherApps: true)
+        return panel.runModal() == .OK ? panel.url : nil
     }
 
     private func retrySummary() {
