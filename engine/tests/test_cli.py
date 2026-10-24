@@ -47,3 +47,39 @@ def test_cli_enroll_too_short(tmp_path, capsys):
     sf.write(wav, tone(5.0), 16000)
     rc = main(["enroll", "--wav", str(wav), "--config", str(cfg_file(tmp_path))], backends=fake_backends([]))
     assert rc == 2 and "at least" in capsys.readouterr().err
+
+
+def test_cli_lists_and_finalizes_unsaved_session(tmp_path, capsys):
+    from datetime import datetime
+
+    from fakes import FakeRunner
+
+    from ontrack.recorder import AudioRecorder
+    from ontrack.session import SessionWriter
+    from ontrack.types import Channel, Speaker
+
+    support = tmp_path / "support"
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'app_support_dir = "{support}"\nsessions_dir = "{tmp_path / "s"}"\nnotes_dir = "{tmp_path / "n"}"\nretranscribe = false\n')
+    w = SessionWriter.start(tmp_path / "s", "Lecture", datetime(2026, 10, 24, 15, 0))
+    w.append(Speaker.ME, 0, 1, "en", "hello")
+    w.close(datetime(2026, 10, 24, 15, 5))
+    rec = AudioRecorder(support / "audio" / w.id, origin_ns=0)
+    from fakes import frames
+    for f in frames(tone(1.0), Channel.MIC):
+        rec.write(f)
+    rec.close()
+
+    assert main(["sessions", "--config", str(cfgp)]) == 0
+    assert w.id in capsys.readouterr().out
+
+    class Diar:
+        def diarize(self, samples):
+            return []
+
+    rc = main(["finalize", w.id, "--config", str(cfgp)], backends=fake_backends([]), diarizer=Diar(),
+              runner=FakeRunner([["## TL;DR\nok"]]))
+    out = capsys.readouterr().out
+    assert rc == 0 and "Saved" in out
+    assert (tmp_path / "n" / w.id / "summary.md").read_text() == "## TL;DR\nok"
+    assert not (support / "audio" / w.id).exists()
