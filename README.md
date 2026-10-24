@@ -29,7 +29,7 @@ Then:
 | Start / stop a session | ⌥⇧S (instant) or menu → Start Session… (asks for a name) |
 | Show / hide overlay | ⌥Space (or the eye icon on the bar) |
 | Live transcription on/off | ⌥⇧L, the bubble icon on the bar, or menu → Live Transcription. Off = record only; transcribed when you save |
-| Save battery | menu → On Battery: Record Only |
+| Save battery | menu → Transcribe After Recording Only When Plugged In: on battery, Save keeps the audio and the heavy work (speaker separation, large-v3, summary) runs once you plug in |
 | Ask about the session | ⌥Space → type → Enter (Esc to collapse) |
 | End of session | overlay card: **Save summary + transcript** (Enter) · Transcript only · Discard (click twice) |
 

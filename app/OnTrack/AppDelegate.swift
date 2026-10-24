@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                           live: settings.liveByDefault)
     private let power = PowerMonitor()
     private var policyAppliedSession: String?
+    private lazy var queue = FinalizeQueue(jsonOrEmpty: settings.finalizeQueue)
+    private var processingSessionId: String?  // queued session currently being finalized
     private lazy var client = EngineClient(directory: settings.appSupportDir)
     private lazy var supervisor = EngineSupervisor(engineDir: settings.engineDir, logDir: settings.logsDir)
     private let capture = CaptureService()
@@ -53,21 +55,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exportFolderName: { [weak self] in self?.settings.exportFolder?.lastPathComponent },
             autoShow: { [weak self] in self?.settings.autoShowOverlay ?? true },
             toggleLive: { [weak self] in self?.store.toggleLive() },
-            toggleBatteryRule: { [weak self] in
+            toggleWaitForPower: { [weak self] in
                 guard let self else { return }
-                self.settings.recordOnlyOnBattery.toggle()
-                self.applyLivePolicy(announce: true)
+                self.settings.waitForPowerToFinalize.toggle()
+                self.processQueue(force: false)
             },
-            batteryRule: { [weak self] in self?.settings.recordOnlyOnBattery ?? false },
+            waitForPower: { [weak self] in self?.settings.waitForPowerToFinalize ?? false },
+            queuedCount: { [weak self] in self?.queue.items.count ?? 0 },
+            processNow: { [weak self] in self?.processQueue(force: true) },
             quit: { NSApp.terminate(nil) }
         ))
 
         store.onLiveToggled = { [weak self] on in self?.settings.liveByDefault = on }
-        power.onChange = { [weak self] _ in self?.applyLivePolicy(announce: true) }
+        power.onChange = { [weak self] onBattery in
+            guard let self, !onBattery, !self.queue.items.isEmpty else { return }
+            self.store.showToast("Plugged in — finishing \(self.queue.items.count) saved session(s)")
+            self.processQueue(force: false)
+        }
         power.start()
         store.sendToEngine = { [weak self] msg in
-            if case let .finalize(sid, _) = msg { self?.lastFinalizeSessionId = sid }
-            self?.client.send(msg)
+            guard let self else { return }
+            if case let .finalize(sid, action) = msg {
+                self.lastFinalizeSessionId = sid
+                if PowerPolicy.deferFinalize(action, onBattery: PowerMonitor.onBattery,
+                                             waitForPower: self.settings.waitForPowerToFinalize) {
+                    self.queue.add(sessionId: sid, action: action)  // audio is kept until it's processed
+                    self.saveQueue()
+                    self.store.send(.deferredUntilPower)
+                    return
+                }
+            }
+            self.client.send(msg)
         }
         store.$state
             .removeDuplicates()
@@ -148,8 +166,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .error(err):
             if enrolling && err.code == "enroll_failed" { finishEnrollment() }
             if err.code == "summary_failed" { pendingSummarySessionId = lastFinalizeSessionId }
+            if let sid = processingSessionId, err.code == "finalize_failed" || err.code == "no_session" {
+                queuedSessionFinished(sid)  // don't block the rest of the queue
+            }
         case let .finalizeDone(sid, path):
             if sid == pendingSummarySessionId { pendingSummarySessionId = nil }
+            if sid == processingSessionId { queuedSessionFinished(sid) }
             if !path.isEmpty, let folder = settings.exportFolder {
                 export(notesPath: path, to: folder)
             }
@@ -165,20 +187,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Live transcription on/off from the user's default and the battery rule (recording continues either way).
     private func applyLivePolicy(announce: Bool) {
-        let onBattery = PowerMonitor.onBattery
-        let desired = LivePolicy.live(preferLive: settings.liveByDefault, onBattery: onBattery,
-                                      recordOnlyOnBattery: settings.recordOnlyOnBattery)
+        let desired = settings.liveByDefault
         guard store.state.recording, desired != store.state.liveTranscription else { return }
         store.send(.toggleLive)
         if announce || !desired {
-            store.showToast(desired ? "Live transcription on"
-                            : onBattery && settings.recordOnlyOnBattery ? "On battery — recording only, transcribed when you save"
-                            : "Recording only — transcribed when you save")
+            store.showToast(desired ? "Live transcription on" : "Recording only — transcribed when you save")
         }
+    }
+
+    // MARK: sessions saved on battery
+
+    private func saveQueue() { settings.finalizeQueue = queue.json() }
+
+    /// Finalize queued sessions one at a time (on mains power, or right away when forced / the switch is off).
+    private func processQueue(force: Bool) {
+        guard processingSessionId == nil, let next = queue.next, client.isConnected else { return }
+        if !force && settings.waitForPowerToFinalize && PowerMonitor.onBattery { return }
+        processingSessionId = next.sessionId
+        lastFinalizeSessionId = next.sessionId
+        client.send(.finalize(sessionId: next.sessionId, action: next.finalizeAction))
+    }
+
+    private func queuedSessionFinished(_ sid: String) {
+        queue.remove(sessionId: sid)
+        saveQueue()
+        processingSessionId = nil
+        processQueue(force: false)
     }
 
     private func connectionChanged(_ up: Bool) {
         if up {
+            processingSessionId = nil  // a restarted engine forgot it: try again
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.processQueue(force: false) }
             // Engine restarted mid-session → resume the same session (spec §8). Audio stays buffered until confirmed.
             if store.state.recording, let sid = store.state.sessionId {
                 resumeSessionId = sid

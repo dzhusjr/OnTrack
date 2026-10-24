@@ -38,10 +38,16 @@ struct Settings {
         nonmutating set { defaults.set(newValue, forKey: "liveByDefault") }
     }
 
-    /// On battery, record only; live transcription resumes when plugged in.
-    var recordOnlyOnBattery: Bool {
-        get { defaults.object(forKey: "recordOnlyOnBattery") as? Bool ?? false }
-        nonmutating set { defaults.set(newValue, forKey: "recordOnlyOnBattery") }
+    /// Run the heavy after-recording work (speaker separation, large-v3, summary) only on mains power.
+    var waitForPowerToFinalize: Bool {
+        get { defaults.object(forKey: "waitForPowerToFinalize") as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: "waitForPowerToFinalize") }
+    }
+
+    /// Sessions saved on battery that still need processing (JSON).
+    var finalizeQueue: Data? {
+        get { defaults.data(forKey: "finalizeQueue") }
+        nonmutating set { defaults.set(newValue, forKey: "finalizeQueue") }
     }
 
     var autoShowOverlay: Bool {

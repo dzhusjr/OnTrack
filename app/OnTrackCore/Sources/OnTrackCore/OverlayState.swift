@@ -105,6 +105,7 @@ public enum OverlayEvent: Equatable {
     case escape
     case hide
     case toggleLive
+    case deferredUntilPower
     case choose(FinalizeAction)
     case dismiss
     case clearError
@@ -138,6 +139,11 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
     case .escape:
         if s.mode == .collapsed { s.mode = .hidden } else if s.mode == .expanded { s.mode = .collapsed }
         if s.endCard?.confirmDiscard == true { s.endCard?.confirmDiscard = false }
+    case .deferredUntilPower:
+        s.endCard = nil
+        s.progress = nil
+        s.mode = s.recording ? .collapsed : .hidden
+        s.toast = "Saved — transcription will finish when your Mac is plugged in"
     case .toggleLive:
         s.liveTranscription.toggle()
         if !s.liveTranscription { s.partials = [] }

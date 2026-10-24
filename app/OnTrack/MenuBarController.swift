@@ -18,8 +18,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var exportFolderName: () -> String?
         var autoShow: () -> Bool
         var toggleLive: () -> Void
-        var toggleBatteryRule: () -> Void
-        var batteryRule: () -> Bool
+        var toggleWaitForPower: () -> Void
+        var waitForPower: () -> Bool
+        var queuedCount: () -> Int
+        var processNow: () -> Void
         var quit: () -> Void
     }
 
@@ -79,10 +81,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         live.target = self
         live.state = state.liveTranscription ? .on : .off
         menu.addItem(live)
-        let battery = NSMenuItem(title: "On Battery: Record Only", action: #selector(toggleBatteryRule), keyEquivalent: "")
-        battery.target = self
-        battery.state = actions.batteryRule() ? .on : .off
-        menu.addItem(battery)
+        let power = NSMenuItem(title: "Transcribe After Recording Only When Plugged In",
+                               action: #selector(toggleWaitForPower), keyEquivalent: "")
+        power.target = self
+        power.state = actions.waitForPower() ? .on : .off
+        menu.addItem(power)
+        let queued = actions.queuedCount()
+        if queued > 0 {
+            let waiting = NSMenuItem(title: "Waiting for power: \(queued) session\(queued == 1 ? "" : "s")",
+                                     action: nil, keyEquivalent: "")
+            waiting.isEnabled = false
+            menu.addItem(waiting)
+            add(menu, "Process Now", #selector(processNow))
+        }
         let auto = NSMenuItem(title: "Show Live Bar When Recording", action: #selector(toggleAutoShow), keyEquivalent: "")
         auto.target = self
         auto.state = actions.autoShow() ? .on : .off
@@ -128,7 +139,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openConfig() { actions.openConfig() }
     @objc private func toggleAutoShow() { actions.toggleAutoShow() }
     @objc private func toggleLive() { actions.toggleLive() }
-    @objc private func toggleBatteryRule() { actions.toggleBatteryRule() }
+    @objc private func toggleWaitForPower() { actions.toggleWaitForPower() }
+    @objc private func processNow() { actions.processNow() }
     @objc private func chooseExportFolder() { actions.chooseExportFolder() }
     @objc private func clearExportFolder() { actions.clearExportFolder() }
     @objc private func quit() { actions.quit() }
