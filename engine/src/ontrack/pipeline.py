@@ -9,7 +9,7 @@ import numpy as np
 
 from .config import Config
 from .echo import EchoFilter
-from .hallucination import is_hallucination
+from .hallucination import is_hallucination, normalize
 from .segmenter import Segmenter
 from .session import SessionWriter
 from .speaker import Embedder, SpeakerLabeler
@@ -71,6 +71,8 @@ class Pipeline:
         writer: SessionWriter,
         voiceprint: np.ndarray | None,
         on_line: Callable[[Line], None] | None = None,
+        fallback_asr: AsrBackend | None = None,
+        on_partial: Callable[[Channel, float, str], None] | None = None,
     ) -> None:
         self.cfg = cfg
         self.backends = backends
@@ -80,6 +82,12 @@ class Pipeline:
         self.labeler = SpeakerLabeler(backends.embedder, voiceprint, cfg)
         self.echo = EchoFilter(cfg)
         self.latencies: list[float] = []
+        self._fallback_asr = fallback_asr
+        self._degraded = False
+        self._held: list[Utterance] = []  # mic utterances waiting for overlapping system audio
+        self._last_text: dict[Channel, tuple[str, float]] = {}  # channel -> (normalized text, t_end)
+        self.on_partial = on_partial
+        self._preview_at: dict[Channel, tuple[float, float]] = {}  # channel -> (utterance start, position)
         self._origin: int | None = writer.origin_ns  # resumed sessions keep their time origin
         self._segmenters: dict[Channel, Segmenter] = {}
 
@@ -92,26 +100,90 @@ class Pipeline:
             seg = Segmenter(frame.channel, self.backends.vad_factory(), self.cfg, self._origin)
             self._segmenters[frame.channel] = seg
         for u in seg.push(frame):
-            self._handle(u)
+            if u.channel == Channel.MIC:
+                self._held.append(u)
+            else:
+                self._handle(u)
+        self._release_held()
+        self._maybe_preview(frame.channel, seg)
+
+    def _maybe_preview(self, channel: Channel, seg: Segmenter) -> None:
+        if self.on_partial is None or not self.cfg.live_preview or self._degraded:
+            return
+        start = seg.open_start_s
+        if start is None:
+            return
+        pos = seg.position_s
+        last = self._preview_at.get(channel)
+        due = last is None or last[0] != start or pos - last[1] >= self.cfg.preview_interval_s
+        if pos - start < self.cfg.preview_min_s or not due:
+            return
+        self._preview_at[channel] = (start, pos)
+        samples = seg.open_samples()
+        t = self.transcriber.preview(Utterance(channel, start, pos, samples))
+        text = t.text.strip()
+        if text and not is_hallucination(t):
+            self.on_partial(channel, start, text)
 
     def finish(self) -> None:
-        pending: list[Utterance] = []
+        pending: list[Utterance] = list(self._held)
+        self._held.clear()
         for seg in self._segmenters.values():
             pending += seg.flush()
-        for u in sorted(pending, key=lambda u: u.t_start):
+        # system utterances first at equal times so echoes can be recognised
+        for u in sorted(pending, key=lambda u: (u.t_start, -int(u.channel))):
             self._handle(u)
 
+    @property
+    def degraded(self) -> bool:
+        return self._degraded
+
+    def set_degraded(self, on: bool) -> None:
+        """Switch live ASR to the fallback model while transcription lags behind."""
+        self._degraded = bool(on and self._fallback_asr is not None)
+        self.transcriber.backend = self._fallback_asr if self._degraded else self.backends.asr
+
+    def _release_held(self) -> None:
+        if not self._held:
+            return
+        sys_seg = self._segmenters.get(Channel.SYSTEM)
+        mic_seg = self._segmenters.get(Channel.MIC)
+        mic_pos = mic_seg.position_s if mic_seg is not None else 0.0
+        w = self.cfg.echo_window_s
+        keep: list[Utterance] = []
+        for u in self._held:
+            ready = sys_seg is None
+            if not ready:
+                horizon = u.t_end + w
+                open_start = sys_seg.open_start_s
+                passed = sys_seg.position_s >= horizon and (open_start is None or open_start > horizon)
+                # time out on the mic clock too: system audio may stall (screen locked, capture error)
+                waited = max(sys_seg.position_s, mic_pos) - u.t_end
+                ready = passed or waited >= self.cfg.mic_hold_max_s
+            if ready:
+                self._handle(u)
+            else:
+                keep.append(u)
+        self._held = keep
+
     def _handle(self, u: Utterance) -> None:
+        if self.on_partial is not None and self.cfg.live_preview:
+            self.on_partial(u.channel, u.t_start, "")  # the final line (or nothing) replaces the preview
         t0 = time.perf_counter()
         t = self.transcriber.transcribe(u)
-        if is_hallucination(t):
+        if is_hallucination(t, duration=u.duration):
             return
         text = t.text.strip()
+        norm = normalize(text)
+        prev = self._last_text.get(u.channel)
+        if prev and u.duration < 1.5 and norm == prev[0] and u.t_start - prev[1] < 10.0:
+            return  # the same short phrase again right away: repeated hallucination
         speaker = self.labeler.label(u)
         if self.echo.is_echo(speaker, u.t_start, u.t_end, text):
             return
         line = self.writer.append(speaker, u.t_start, u.t_end, t.lang, text)
-        self.transcriber.remember(u.channel, text)
+        self._last_text[u.channel] = (norm, u.t_end)
+        self.transcriber.remember(u.channel, text, t.lang)
         self.echo.observe(line)
         self.latencies.append(time.perf_counter() - t0)
         if self.on_line:

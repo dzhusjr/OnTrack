@@ -19,7 +19,7 @@ def test_single_utterance_after_600ms_silence():
     out, _ = run(np.concatenate([silence(1.0), tone(2.0), silence(1.0)]))
     assert len(out) == 1
     assert out[0].t_start == pytest.approx(0.8, abs=0.04)  # 200 ms pre-pad
-    assert out[0].t_end == pytest.approx(3.0, abs=0.1)
+    assert out[0].t_end == pytest.approx(3.2, abs=0.1)  # 200 ms post-pad keeps the last syllable
     assert out[0].channel == Channel.MIC
 
 
@@ -93,4 +93,23 @@ def test_stale_frame_is_dropped():  # review #5
     out = []
     for f in fs[:30] + fs[0:15] + fs[30:]:  # 300 ms of stale/duplicate frames replayed
         out += seg.push(f)
-    assert len(out) == 1 and len(out[0].samples) <= 1.0 * 16000 + 512 + 1600  # ≤100 ms jitter tolerance
+    assert len(out) == 1 and len(out[0].samples) <= 1.0 * 16000 + 512 + 1600 + 3200  # jitter tolerance + 200 ms post-pad
+
+
+def test_position_and_open_start_reported():
+    seg = Segmenter(Channel.MIC, EnergyVad(), load_config(None), origin_ns=0)
+    assert seg.position_s == 0.0 and seg.open_start_s is None
+    for f in frames(np.concatenate([silence(1.0), tone(1.0)]), Channel.MIC):
+        seg.push(f)
+    assert seg.position_s == pytest.approx(2.0, abs=0.04)
+    assert seg.open_start_s == pytest.approx(0.8, abs=0.04)
+    for f in frames(silence(1.0), Channel.MIC, start_ns=2_000_000_000):
+        seg.push(f)
+    assert seg.open_start_s is None
+
+
+def test_post_pad_keeps_trailing_audio_after_last_speech_window():
+    out, _ = run(np.concatenate([tone(1.0), silence(1.0)]))
+    assert len(out) == 1
+    tail = out[0].samples[-int(0.15 * 16000):]
+    assert np.abs(tail).max() == 0.0  # padded with the (silent) audio that followed, not dropped

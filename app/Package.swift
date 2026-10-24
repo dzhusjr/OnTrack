@@ -1,0 +1,16 @@
+// swift-tools-version:5.9
+// Builds OnTrack.app without full Xcode (Command Line Tools are enough): see scripts/dev.sh.
+import PackageDescription
+
+let package = Package(
+    name: "OnTrackApp",
+    platforms: [.macOS(.v14)],
+    dependencies: [.package(path: "OnTrackCore")],
+    targets: [
+        .executableTarget(
+            name: "OnTrack",
+            dependencies: [.product(name: "OnTrackCore", package: "OnTrackCore")],
+            path: "OnTrack"
+        ),
+    ]
+)

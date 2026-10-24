@@ -90,3 +90,39 @@ def fake_backends(transcripts):
     from ontrack.pipeline import Backends
 
     return Backends(EnergyVad, FakeAsr([({t.lang: 1.0}, t) for t in transcripts]), FakeEmbedder())
+
+
+# ---- M2+: LLM runner -------------------------------------------------------
+class FakeRunner:
+    """Scripted ClaudeRunner: each call pops a list of chunks or an exception."""
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.prompts: list[str] = []
+
+    def stream(self, prompt, timeout_s):
+        self.prompts.append(prompt)
+        item = self.script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        yield from item
+
+    def complete(self, prompt, timeout_s):
+        return "".join(self.stream(prompt, timeout_s))
+
+
+# ---- language selection ----------------------------------------------------------
+class LangAsr:
+    """Fixed language probabilities; per-language transcripts; records every run's (language, prompt)."""
+
+    def __init__(self, probs: dict, by_lang: dict):
+        self.probs, self.by_lang = probs, by_lang
+        self.calls: list[tuple[str, str | None]] = []
+
+    def detect_language(self, samples):
+        return dict(self.probs)
+
+    def run(self, samples, language, initial_prompt):
+        self.calls.append((language, initial_prompt))
+        text, logprob = self.by_lang.get(language, ("", -5.0))
+        return Transcript(text, language, logprob, 0.0, 1.0)

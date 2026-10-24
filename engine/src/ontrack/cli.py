@@ -9,8 +9,10 @@ from pathlib import Path
 
 from .audio_source import WavAudioSource, load_wav_16k
 from .config import Config, load_config
-from .pipeline import Backends, Pipeline, merge_key, real_backends
-from .session import SessionWriter
+from .finalize import FinalizeDeps, finalize
+from .pipeline import Backends, Lazy, Pipeline, merge_key, real_backends
+from .session import SessionWriter, read_lines
+from .transcriber import Transcriber
 from .speaker import enroll, load_voiceprint
 from .types import Channel, Line
 
@@ -63,7 +65,51 @@ def _enroll(args, backends: Backends | None) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None, backends: Backends | None = None) -> int:
+def _sessions(args) -> int:
+    """Sessions whose temporary audio still exists, i.e. not saved or discarded yet."""
+    cfg = _config(args)
+    audio_root = cfg.app_support_dir / "audio"
+    pending = sorted(p.name for p in audio_root.iterdir() if p.is_dir()) if audio_root.exists() else []
+    if not pending:
+        print("No unsaved sessions.")
+    for sid in pending:
+        lines = len(read_lines(cfg.sessions_dir / sid)) if (cfg.sessions_dir / sid).exists() else 0
+        print(f"{sid}  ({lines} lines)")
+    return 0
+
+
+def _finalize_cmd(args, backends: Backends | None, diarizer, runner) -> int:
+    cfg = _config(args)
+    session_dir = cfg.sessions_dir / args.session_id
+    if "/" in args.session_id or not (session_dir / "meta.json").exists():
+        print(f"Unknown session {args.session_id} — see 'ontrack sessions'", file=sys.stderr)
+        return 2
+    injected = backends is not None  # tests pass fakes; real runs use full large-v3 for the saved transcript
+    backends = backends or real_backends(cfg)
+    if diarizer is None:
+        from .diarize_pyannote import PyannoteDiarizer
+
+        diarizer = Lazy(PyannoteDiarizer)
+    if runner is None:
+        from .llm import ClaudeRunner
+
+        runner = ClaudeRunner(cfg)
+    final_asr = backends.asr
+    if not injected and args.final_model:
+        from .asr_mlx import MlxWhisperBackend
+
+        final_asr = MlxWhisperBackend(cfg.final_whisper_model)
+    deps = FinalizeDeps(diarizer, backends.embedder, load_voiceprint(cfg.app_support_dir / "voiceprint.npy"),
+                        Transcriber(final_asr, cfg) if cfg.retranscribe else None, runner, cfg)
+    notes = finalize(session_dir, cfg.app_support_dir / "audio" / args.session_id, args.action, deps,
+                     lambda stage, pct: print(f"  {stage} {pct:.0%}", flush=True),
+                     on_summary_error=lambda e: print(f"! summary failed ({e.code}): {e.message}", file=sys.stderr),
+                     on_warning=lambda text: print(f"! {text}", file=sys.stderr))
+    print(f"Saved to {notes}" if notes else "Discarded.")
+    return 0
+
+
+def main(argv: list[str] | None = None, backends: Backends | None = None, diarizer=None, runner=None) -> int:
     p = argparse.ArgumentParser(prog="ontrack")
     sub = p.add_subparsers(dest="cmd", required=True)
     t = sub.add_parser("transcribe", help="transcribe WAV recordings into a session folder")
@@ -75,7 +121,19 @@ def main(argv: list[str] | None = None, backends: Backends | None = None) -> int
     e = sub.add_parser("enroll", help="save your voiceprint from a recording of you speaking")
     e.add_argument("--wav", required=True)
     e.add_argument("--config")
+    ls = sub.add_parser("sessions", help="list sessions that were never saved (e.g. app quit or crashed)")
+    ls.add_argument("--config")
+    fz = sub.add_parser("finalize", help="save (or discard) an unsaved session")
+    fz.add_argument("session_id")
+    fz.add_argument("--action", default="save_all", choices=["save_all", "transcript_only", "discard"])
+    fz.add_argument("--config")
+    fz.add_argument("--no-final-model", dest="final_model", action="store_false",
+                    help="re-transcribe with the live model instead of full large-v3")
     args = p.parse_args(argv)
+    if args.cmd == "sessions":
+        return _sessions(args)
+    if args.cmd == "finalize":
+        return _finalize_cmd(args, backends, diarizer, runner)
     if args.cmd == "transcribe":
         return _transcribe(args, backends)
     return _enroll(args, backends)

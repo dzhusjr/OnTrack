@@ -14,3 +14,7 @@ def test_line_json_roundtrip_keeps_unicode():
 def test_utterance_duration():
     u = Utterance(Channel.MIC, 1.0, 3.5, np.zeros(40000, np.float32))
     assert u.duration == 2.5
+
+
+def test_note_speaker():
+    assert Speaker("Note") is Speaker.NOTE

@@ -1,0 +1,37 @@
+name: OnTrack
+options:
+  bundleIdPrefix: com.romandzhus
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  OnTrackCore:
+    path: OnTrackCore
+targets:
+  OnTrack:
+    type: application
+    platform: macOS
+    sources:
+      - path: OnTrack
+    dependencies:
+      - package: OnTrackCore
+    info:
+      path: OnTrack/Info.plist
+      properties:
+        CFBundleDisplayName: OnTrack
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSMinimumSystemVersion: "14.0"
+        NSMicrophoneUsageDescription: "OnTrack transcribes lectures, meetings and calls locally on this Mac."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.romandzhus.ontrack
+        PRODUCT_NAME: OnTrack
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        COMBINE_HIDPI_IMAGES: YES

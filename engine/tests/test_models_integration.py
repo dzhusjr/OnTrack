@@ -92,3 +92,10 @@ def test_room_noise_produces_no_lines(backends, tmp_path):
         p.process(AudioFrame(Channel.MIC, i * 62_500, x[i : i + 320]))
     p.finish()
     assert read_lines(w.dir) == []
+
+
+def test_pyannote_diarizer_finds_two_speakers_in_dialog():
+    from ontrack.diarize_pyannote import PyannoteDiarizer
+
+    segs = PyannoteDiarizer().diarize(load_wav_16k(FX / "dialog.wav"))
+    assert len({label for _, _, label in segs}) >= 2

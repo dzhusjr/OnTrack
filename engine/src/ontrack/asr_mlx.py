@@ -18,6 +18,10 @@ class MlxWhisperBackend:
         # Shared cache with mlx_whisper.transcribe(), so the model is loaded once.
         self._model = ModelHolder.get_model(model_id, mx.float16)
 
+    def warmup(self) -> None:
+        """Compile Metal kernels before the first real utterance."""
+        self.run(np.zeros(16000, np.float32), "en", None)
+
     def detect_language(self, samples: np.ndarray) -> dict[str, float]:
         from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
 
