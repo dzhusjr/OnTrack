@@ -39,14 +39,13 @@ public struct FinalizeProgress: Equatable, Sendable {
 }
 
 public enum OverlayMode: Equatable, Sendable {
-    case hidden, mini, collapsed, expanded, endCard, finalizing, done
+    case hidden, collapsed, expanded, endCard, finalizing, done
 }
 
 /// Everything the overlay shows (spec §6). Pure value; changed only by `reduce`.
 public struct OverlayState: Equatable {
     public var maxLines: Int
     public var autoShow = true  // show the live bar automatically when recording starts
-    public var miniPill = true  // when hidden during a recording, keep a small ● timer pill on screen
     public var liveTranscription = true  // off = recording only; transcribed when the session is saved
     public var mode: OverlayMode = .hidden
     public var lines: [OverlayLine] = []
@@ -77,9 +76,6 @@ public struct OverlayState: Equatable {
     public init(maxLines: Int = 3) {
         self.maxLines = max(1, min(5, maxLines))
     }
-
-    /// Where "hide" goes: the mini pill while recording (so you never lose OnTrack), otherwise fully hidden.
-    var hiddenMode: OverlayMode { recording && miniPill ? .mini : .hidden }
 
     fileprivate mutating func lineArrived(_ l: TranscriptLine) {
         guard let sid = sessionId, l.sessionId == sid, l.seq > lastSeq else { return }
@@ -123,9 +119,9 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         return reduceEngine(&s, msg)
     case .toggle:
         switch s.mode {
-        case .hidden, .mini: s.mode = (s.endCard != nil) ? .endCard : .collapsed
+        case .hidden: s.mode = (s.endCard != nil) ? .endCard : .collapsed
         case .collapsed: s.mode = .expanded
-        case .expanded: s.mode = s.question.isEmpty ? s.hiddenMode : .collapsed
+        case .expanded: s.mode = s.question.isEmpty ? .hidden : .collapsed
         case .endCard, .finalizing, .done: s.mode = .hidden
         }
     case let .questionChanged(q):
@@ -140,14 +136,14 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.question = ""
         return [.ask(id: id, question: q)]
     case .escape:
-        if s.mode == .collapsed { s.mode = s.hiddenMode } else if s.mode == .expanded { s.mode = .collapsed }
+        if s.mode == .collapsed { s.mode = .hidden } else if s.mode == .expanded { s.mode = .collapsed }
         if s.endCard?.confirmDiscard == true { s.endCard?.confirmDiscard = false }
     case .toggleLive:
         s.liveTranscription.toggle()
         if !s.liveTranscription { s.partials = [] }
         return s.recording ? [.setLive(s.liveTranscription)] : []
     case .hide:
-        if s.mode == .collapsed || s.mode == .expanded { s.mode = s.hiddenMode }
+        if s.mode == .collapsed || s.mode == .expanded { s.mode = .hidden }
     case let .choose(action):
         guard var card = s.endCard, s.mode == .endCard else { return [] }
         if action == .discard && !card.confirmDiscard {
@@ -186,10 +182,9 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         s.modelReady = st.modelReady
         s.degraded = st.degraded
         let nowRecording = st.state == "recording" || st.state == "stopping"
-        if st.state == "recording" { s.recording = true }
         if nowRecording, let sid = st.sessionId, sid != s.sessionId || !s.recording {
             if sid != s.sessionId { s.beginSession(sid) }
-            if s.mode == .done || s.mode == .hidden { s.mode = s.autoShow ? .collapsed : s.hiddenMode }
+            if s.mode == .done || (s.mode == .hidden && s.autoShow) { s.mode = s.autoShow ? .collapsed : .hidden }
         }
         if st.state == "recording" { s.recording = true }
         if st.state == "idle" { s.recording = false }

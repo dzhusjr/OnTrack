@@ -40,8 +40,8 @@ final class OverlayReducerTests: XCTestCase {
         recording(&s)
         _ = reduce(&s, .toggle)
         XCTAssertEqual(s.mode, .expanded)
-        _ = reduce(&s, .toggle)  // empty question → hide (mini pill while recording)
-        XCTAssertEqual(s.mode, .mini)
+        _ = reduce(&s, .toggle)  // empty question → hide
+        XCTAssertEqual(s.mode, .hidden)
         _ = reduce(&s, .toggle)
         XCTAssertEqual(s.mode, .collapsed)
     }
@@ -207,10 +207,10 @@ final class HideOverlayTests: XCTestCase {
         rec(&s)
         XCTAssertEqual(s.mode, .collapsed)
         reduce(&s, .escape)
-        XCTAssertEqual(s.mode, .mini)
+        XCTAssertEqual(s.mode, .hidden)
         reduce(&s, .toggle)
         reduce(&s, .hide)
-        XCTAssertEqual(s.mode, .mini)
+        XCTAssertEqual(s.mode, .hidden)
         XCTAssertTrue(s.recording)  // hiding never stops recording
     }
 
@@ -218,7 +218,7 @@ final class HideOverlayTests: XCTestCase {
         var s = OverlayState()
         s.autoShow = false
         rec(&s)
-        XCTAssertEqual(s.mode, .mini)
+        XCTAssertEqual(s.mode, .hidden)
         reduce(&s, .toggle)
         XCTAssertEqual(s.mode, .collapsed)
     }
@@ -302,46 +302,5 @@ final class LiveToggleTests: XCTestCase {
         var s = OverlayState()
         XCTAssertEqual(reduce(&s, .toggleLive), [])
         XCTAssertFalse(s.liveTranscription)
-    }
-}
-
-final class MiniPillTests: XCTestCase {
-    private func rec(_ s: inout OverlayState) {
-        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
-    }
-
-    func testHidingDuringRecordingLeavesAMiniPill() {
-        var s = OverlayState()
-        rec(&s)
-        reduce(&s, .hide)
-        XCTAssertEqual(s.mode, .mini)
-        reduce(&s, .toggle)  // ⌥Space or a click on the pill
-        XCTAssertEqual(s.mode, .collapsed)
-        reduce(&s, .escape)
-        XCTAssertEqual(s.mode, .mini)
-    }
-
-    func testPillCanBeTurnedOff() {
-        var s = OverlayState()
-        s.miniPill = false
-        rec(&s)
-        reduce(&s, .hide)
-        XCTAssertEqual(s.mode, .hidden)
-    }
-
-    func testNotRecordingHidesCompletely() {
-        var s = OverlayState()
-        reduce(&s, .toggle)
-        reduce(&s, .hide)
-        XCTAssertEqual(s.mode, .hidden)
-    }
-
-    func testRecordingStartsAsPillWhenAutoShowIsOff() {
-        var s = OverlayState()
-        s.autoShow = false
-        rec(&s)
-        XCTAssertEqual(s.mode, .mini)
-        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 60, lineCount: 3)))
-        XCTAssertEqual(s.mode, .endCard)
     }
 }
