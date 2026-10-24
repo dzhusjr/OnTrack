@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -131,8 +132,9 @@ def postprocess(
             segments, names = [], {}
             msg = f"Speaker separation unavailable, kept live labels: {e}"
             if "403" in str(e) or "gated" in str(e).lower():
-                msg = ("Speaker separation unavailable: accept the model terms at huggingface.co/pyannote/segmentation-3.0 "
-                       f"and huggingface.co/pyannote/speaker-diarization-3.1 ({str(e).splitlines()[0]})")
+                repo = re.search(r"huggingface\.co/(pyannote/[\w.-]+)", str(e))
+                which = f"huggingface.co/{repo.group(1)}" if repo else "the pyannote models"
+                msg = f"Speaker separation unavailable: accept the model terms at {which} (403)"
             if on_warning:
                 on_warning(msg)
 
