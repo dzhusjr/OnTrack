@@ -64,6 +64,27 @@ final class OverlayReducerTests: XCTestCase {
         XCTAssertEqual(reduce(&s, .submitQuestion(id: "q2")), [])  // empty question
     }
 
+    func testHidingWhileSavingKeepsSavingAndNeverReshowsChoiceCard() {
+        var s = OverlayState()
+        recording(&s)
+        _ = reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 600, lineCount: 50)))
+        _ = reduce(&s, .choose(.saveAll))
+        XCTAssertEqual(reduce(&s, .toggle), [])  // ⌥Space: hide only, no engine command
+        XCTAssertEqual(s.mode, .hidden)
+        _ = reduce(&s, .engine(.finalizeProgress(sessionId: "s1", stage: "retranscribing", pct: 0.3)))
+        XCTAssertEqual(s.mode, .hidden)
+        _ = reduce(&s, .toggle)  // reopen → progress, not the Save/Discard card
+        XCTAssertEqual(s.mode, .finalizing)
+        XCTAssertEqual(reduce(&s, .choose(.saveAll)), [])  // Enter can't re-send finalize
+        _ = reduce(&s, .toggle)
+        _ = reduce(&s, .engine(.finalizeDone(sessionId: "s1", notesPath: "/n/s1")))
+        XCTAssertEqual(s.mode, .hidden)  // stays hidden, just a toast
+        XCTAssertEqual(s.toast, "Saved to notes")
+        XCTAssertNil(s.endCard)
+        _ = reduce(&s, .toggle)
+        XCTAssertEqual(s.mode, .collapsed)
+    }
+
     func testEndOfSessionSaveFlow() {
         var s = OverlayState()
         recording(&s)

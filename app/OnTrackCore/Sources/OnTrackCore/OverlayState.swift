@@ -120,7 +120,9 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         return reduceEngine(&s, msg)
     case .toggle:
         switch s.mode {
-        case .hidden: s.mode = (s.endCard != nil) ? .endCard : .collapsed
+        case .hidden:
+            // saving keeps running while hidden: reopen on its progress, never on the choice card again
+            if s.progress != nil { s.mode = .finalizing } else { s.mode = (s.endCard != nil) ? .endCard : .collapsed }
         case .collapsed: s.mode = .expanded
         case .expanded: s.mode = s.question.isEmpty ? .hidden : .collapsed
         case .endCard, .finalizing, .done: s.mode = .hidden
@@ -171,7 +173,7 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.toast = nil
     case .disconnected:
         s.engineState = "disconnected"
-        if s.mode == .finalizing {  // engine went away mid-save: let the user retry (saving is idempotent)
+        if s.mode == .finalizing || (s.mode == .hidden && s.progress != nil) {  // engine went away mid-save: let the user retry (saving is idempotent)
             s.mode = .endCard
             s.progress = nil
             s.error = "The engine restarted while saving — choose again to retry."
@@ -229,6 +231,11 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         }
         s.notesPath = path.isEmpty ? nil : path
         s.progress = nil
+        if s.mode == .hidden {  // user hid the overlay while saving: stay out of the way, just confirm
+            s.endCard = nil
+            if !path.isEmpty { s.toast = "Saved to notes" }
+            return []
+        }
         s.mode = path.isEmpty ? (s.recording ? .collapsed : .hidden) : .done
         if path.isEmpty { s.endCard = nil }
     case let .enrollDone(score):
@@ -236,7 +243,10 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
     case let .error(err):
         s.error = err.message
         // only a failed save reopens the card; warnings (speaker separation, summary) arrive while saving continues
-        if s.mode == .finalizing && err.code == "finalize_failed" { s.mode = .endCard }
+        if (s.mode == .finalizing || s.progress != nil) && err.code == "finalize_failed" {
+            s.mode = .endCard
+            s.progress = nil
+        }
     case .pong, .unknown:
         break
     }
