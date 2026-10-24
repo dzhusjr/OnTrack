@@ -40,7 +40,7 @@ final class EngineSupervisor {
         p.waitUntilExit()
     }
 
-    /// Ping every 2 s while connected; 3 missed pongs → restart.
+    /// Ping every 2 s while connected; ~20 s without any message → restart (heavy model loads can stall the engine for a few seconds).
     func startHealthChecks(client: EngineClient) {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self, weak client] _ in
@@ -60,7 +60,7 @@ final class EngineSupervisor {
             }
             self.unreachableSince = nil
             self.missedPings += 1
-            if self.missedPings > 3 {
+            if self.missedPings > 10 {
                 NSLog("OnTrack: engine unresponsive — restarting")
                 self.missedPings = 0
                 self.restart()

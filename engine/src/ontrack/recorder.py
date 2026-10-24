@@ -47,6 +47,23 @@ def _chunk_frames(path: Path, chunk: int) -> int:
     return len(data)
 
 
+def recorded_seconds(audio_dir: Path) -> float:
+    """Longest channel recorded so far (survives engine restarts; unreadable chunks are skipped)."""
+    best = 0
+    for channel in _NAMES:
+        total = 0
+        for p in _chunks(audio_dir, channel):
+            try:
+                frames = sf.info(str(p)).frames
+            except Exception:
+                frames = -1
+            if not 0 < frames < 4 * 3600 * SAMPLE_RATE:  # header never finalised (crash): count what decodes
+                frames = len(_decode_tolerant(p))
+            total += frames
+        best = max(best, total)
+    return best / SAMPLE_RATE
+
+
 class _ChannelWriter:
     def __init__(self, audio_dir: Path, channel: Channel, chunk: int) -> None:
         self.dir, self.channel, self.chunk = audio_dir, channel, chunk

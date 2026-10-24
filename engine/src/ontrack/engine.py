@@ -23,8 +23,8 @@ from .finalize import FinalizeDeps, finalize, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .qa import QaService
-from .recorder import AudioRecorder
-from .session import SessionWriter, read_lines
+from .recorder import AudioRecorder, recorded_seconds
+from .session import SessionWriter, paused_ranges, read_lines
 from .speaker import enroll, load_voiceprint
 from .transcriber import Transcriber
 from .types import SAMPLE_RATE, AudioFrame, Channel, Line, Speaker
@@ -327,6 +327,24 @@ class EngineService:
         log.info("live transcription %s", "on" if enabled else "off")
         self._send_status()
 
+    def _session_duration(self, writer: SessionWriter) -> float:
+        """Best estimate of the session length. Frame timestamps alone are lost when the engine restarts
+        mid-session (and nothing arrives before stop), so also use the audio on disk and the transcript."""
+        candidates = [0.0]
+        origin = writer.origin_ns
+        if self._last_t and origin is not None:
+            candidates.append((max(self._last_t.values()) - origin) / 1e9 + 0.02)
+        try:
+            candidates.append(recorded_seconds(self._audio_dir(writer.id)))
+        except Exception:
+            log.exception("could not measure recorded audio")
+        try:
+            candidates.append(max((l.t_end for l in read_lines(writer.dir)), default=0.0))
+            candidates.extend(b for _, b in paused_ranges(writer.dir))
+        except Exception:
+            log.exception("could not read transcript for duration")
+        return max(candidates)
+
     async def _stop_session(self, notify: bool) -> None:
         if not self.live and self._pause_start is not None and self.writer is not None:
             end = self._session_now() or self._pause_start
@@ -341,9 +359,7 @@ class EngineService:
         writer.close(datetime.now())
         if self.recorder:
             self.recorder.close()
-        origin = writer.origin_ns
-        last = max(self._last_t.values()) if self._last_t else None
-        duration = (last - origin) / 1e9 + 0.02 if (last is not None and origin is not None) else 0.0
+        duration = self._session_duration(writer)
         self.last_session = writer.dir
         self.state = "idle"
         if notify:

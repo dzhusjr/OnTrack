@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: engine events
 
     private func handle(_ msg: Inbound) {
+        supervisor.noteAlive()  // any message proves the engine is alive, not just pongs
         switch msg {
         case .pong:
             supervisor.noteAlive()

@@ -209,6 +209,34 @@ def test_resume_same_session_id_continues_seq_and_time(dirs):  # Review Focus 1
     asyncio.run(run_with(svc2, second))
 
 
+def test_stop_right_after_resume_reports_full_duration(dirs):  # "0 s" end card after an engine restart
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("before crash"))])
+    state = {}
+
+    async def first():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        state["id"] = st["session_id"]
+        await c.audio(frames(SPEECH, Channel.MIC, start_ns=5_000_000_000))
+        await c.expect(typ("line"))
+        await c.close()
+
+    asyncio.run(run_with(svc, first))
+    svc2, _ = make_service(dirs)
+
+    async def second():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L", "session_id": state["id"]})
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.send({"type": "stop_session"})  # no audio after the restart
+        stopped = await c.expect(typ("session_stopped"))
+        assert stopped["duration_s"] == pytest.approx(len(SPEECH) / 16000, abs=0.3)
+        await c.close()
+
+    asyncio.run(run_with(svc2, second))
+
+
 def test_gap_inserts_note_line(dirs):
     svc, cfg = make_service(dirs, [({"en": 1}, tr("a")), ({"en": 1}, tr("b"))])
 
