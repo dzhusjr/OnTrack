@@ -400,3 +400,28 @@ def test_missing_voiceprint_is_reported_on_start(dirs):
         await c.close()
 
     asyncio.run(run_with(svc, body))
+
+
+def test_finalize_retranscribes_with_the_final_model(dirs):
+    sock, tmp = dirs
+    cfg = replace(load_config(None), app_support_dir=sock, sessions_dir=tmp / "sessions", notes_dir=tmp / "notes",
+                  live_preview=False)
+    final = FakeAsr([({"en": 1}, tr("Hello world, properly punctuated."))])
+    svc = EngineService(cfg, Backends(EnergyVad, FakeAsr([({"en": 1}, tr("hello world"))]), FakeEmbedder()),
+                        FakeRunner([]), diarizer=Diar(), final_asr=final)
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.MIC))
+        await c.expect(typ("line"))
+        await c.send({"type": "stop_session"})
+        await c.expect(typ("session_stopped"))
+        await c.send({"type": "finalize", "session_id": st["session_id"], "action": "transcript_only"})
+        done = await c.expect(typ("finalize_done"))
+        assert "properly punctuated" in (Path(done["notes_path"]) / "transcript.md").read_text()
+        assert final.calls
+        await c.close()
+
+    asyncio.run(run_with(svc, body))

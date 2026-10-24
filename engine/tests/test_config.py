@@ -7,7 +7,7 @@ from ontrack.config import load_config
 
 def test_defaults():
     c = load_config(None)
-    assert c.tau == 0.55 and c.allowed_langs == ("en", "nl", "uk", "ru") and c.max_utt_s == 15.0
+    assert c.tau == 0.55 and c.allowed_langs == ("en", "nl", "uk") and c.max_utt_s == 15.0
 
 
 def test_toml_overrides(tmp_path):
@@ -41,3 +41,15 @@ def test_bool_override(tmp_path):
     p = tmp_path / "c.toml"
     p.write_text("retranscribe = false\n")
     assert load_config(p).retranscribe is False
+
+
+def test_accuracy_defaults():
+    c = load_config(None)
+    assert c.final_whisper_model == "mlx-community/whisper-large-v3-mlx"
+    assert c.vocabulary == () and c.post_pad_ms == 200
+
+
+def test_vocabulary_from_toml(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('vocabulary = ["KU Leuven", "eigenvalue", "Raccoon Gang"]\n')
+    assert load_config(p).vocabulary == ("KU Leuven", "eigenvalue", "Raccoon Gang")

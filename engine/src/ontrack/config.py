@@ -16,9 +16,12 @@ class Config:
     max_utt_s: float = 15.0
     split_search_s: float = 3.0
     split_window_ms: int = 100
-    allowed_langs: tuple[str, ...] = ("en", "nl", "uk", "ru")  # order breaks ties: uk before ru
+    allowed_langs: tuple[str, ...] = ("en", "nl", "uk")  # add "ru" only if you want Russian output
     lang_tie_margin: float = 0.35  # decodes within this avg-logprob of the best count as a tie
-    whisper_model: str = "mlx-community/whisper-large-v3-turbo"
+    whisper_model: str = "mlx-community/whisper-large-v3-turbo"  # live
+    final_whisper_model: str = "mlx-community/whisper-large-v3-mlx"  # saved transcript (slower, more accurate)
+    vocabulary: tuple[str, ...] = ()  # names / course terms that Whisper should spell right
+    post_pad_ms: int = 200
     context_lines: int = 2
     short_utt_s: float = 1.0
     neighbor_gap_s: float = 1.5

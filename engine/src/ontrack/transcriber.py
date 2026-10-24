@@ -19,7 +19,13 @@ class AsrBackend(Protocol):
 CONFIDENT = 0.8  # language-ID probability above which we decode once
 # Whisper's language ID is confidently wrong toward Russian on Ukrainian speech, so a Russian pick is always
 # checked against Ukrainian; a short native anchor prompt keeps Ukrainian spelling from drifting.
-ANCHOR_PROMPTS = {"uk": "Розмова українською мовою.", "nl": "Een gesprek in het Nederlands."}
+# Whisper copies the style of its prompt: a short, properly punctuated native sentence gives capitals,
+# punctuation and the right orthography (Ukrainian і/ї/є instead of Russified spelling).
+ANCHOR_PROMPTS = {
+    "en": "Hello, welcome. Let's begin.",
+    "nl": "Hallo, welkom. Laten we beginnen.",
+    "uk": "Привіт, вітаю. Розмова українською мовою.",
+}
 
 
 class Transcriber:
@@ -38,7 +44,18 @@ class Transcriber:
     def _prompt(self, channel: Channel, lang: str) -> str | None:
         # only same-language context: a Russian prompt pushes English speech into Russian
         same = [t for l, t in self._ctx(channel) if l is None or l == lang][-self.cfg.context_lines :]
-        return " ".join(same) if same else ANCHOR_PROMPTS.get(lang)
+        parts = [ANCHOR_PROMPTS[lang]] if lang in ANCHOR_PROMPTS else []
+        if self.cfg.vocabulary:
+            parts.append("Terms: " + ", ".join(self.cfg.vocabulary) + ".")
+        parts += same
+        return " ".join(parts) if parts else None
+
+    def _run(self, samples, lang: str, prompt: str | None) -> Transcript:
+        t = self.backend.run(samples, lang, prompt)
+        text = t.text.strip()
+        if prompt and len(text) > 15 and text in prompt:  # Whisper echoed its prompt on silence/noise
+            return Transcript("", t.lang, t.avg_logprob, t.no_speech_prob, t.compression_ratio)
+        return t
 
     def transcribe(self, u: Utterance) -> Transcript:
         probs = self.backend.detect_language(u.samples)
@@ -47,7 +64,7 @@ class Transcriber:
         candidates = ranked[:1] if probs.get(ranked[0], 0.0) >= CONFIDENT or len(ranked) < 2 else ranked[:2]
         if "ru" in candidates and "uk" in allowed and "uk" not in candidates:
             candidates.append("uk")
-        results = [(l, self.backend.run(u.samples, l, self._prompt(u.channel, l))) for l in candidates]
+        results = [(l, self._run(u.samples, l, self._prompt(u.channel, l))) for l in candidates]
         results = [(l, t) for l, t in results if t.text.strip()] or results
         best_lp = max(t.avg_logprob for _, t in results)
         close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - self.cfg.lang_tie_margin]
@@ -62,7 +79,7 @@ class Transcriber:
             probs = self.backend.detect_language(u.samples)
             allowed = list(self.cfg.allowed_langs)
             lang = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))[0]
-        return self.backend.run(u.samples, lang, self._prompt(u.channel, lang))
+        return self._run(u.samples, lang, self._prompt(u.channel, lang))
 
     def remember(self, channel: Channel, text: str, lang: str | None = None) -> None:
         self._ctx(channel).append((lang, text))

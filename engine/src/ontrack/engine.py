@@ -62,13 +62,15 @@ def _mmss(seconds: float) -> str:
 
 
 class EngineService:
-    def __init__(self, cfg: Config, backends: Backends, runner, diarizer=None, fallback_asr=None) -> None:
+    def __init__(self, cfg: Config, backends: Backends, runner, diarizer=None, fallback_asr=None, final_asr=None) -> None:
         self.cfg = cfg
         self.model_ready = not (isinstance(backends.asr, Lazy) or hasattr(backends.asr, "warmup"))
         self.backends = Backends(backends.vad_factory, LockedAsr(backends.asr), backends.embedder)
         self.runner = runner
         self.diarizer = diarizer
         self.fallback_asr = LockedAsr(fallback_asr) if fallback_asr is not None else None
+        # full large-v3 for the saved transcript (more accurate than the live turbo model)
+        self.final_asr = LockedAsr(final_asr) if final_asr is not None else self.backends.asr
         self.qa = QaService(runner, cfg)
         self.state = "idle"
         self.degraded = False
@@ -479,7 +481,7 @@ class EngineService:
         self._finalizing.add(session_id)
         if self.state == "idle":
             self._set_state("postprocessing")
-        transcriber = Transcriber(self.backends.asr, self.cfg) if self.cfg.retranscribe else None
+        transcriber = Transcriber(self.final_asr, self.cfg) if self.cfg.retranscribe else None
         deps = FinalizeDeps(self.diarizer, self.backends.embedder,
                             load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy"),
                             transcriber, self.runner, self.cfg)
@@ -569,7 +571,13 @@ def main(argv: list[str] | None = None) -> int:
 
         return PyannoteDiarizer()
 
-    svc = EngineService(cfg, real_backends(cfg), ClaudeRunner(cfg), diarizer=Lazy(diarizer), fallback_asr=Lazy(fallback))
+    def final():
+        from .asr_mlx import MlxWhisperBackend
+
+        return MlxWhisperBackend(cfg.final_whisper_model)
+
+    svc = EngineService(cfg, real_backends(cfg), ClaudeRunner(cfg), diarizer=Lazy(diarizer),
+                        fallback_asr=Lazy(fallback), final_asr=Lazy(final))
 
     async def run() -> None:
         loop = asyncio.get_running_loop()

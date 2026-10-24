@@ -41,6 +41,9 @@ setup() {
   need claude "npm i -g @anthropic-ai/claude-code, then run 'claude' once to log in"
   (cd "$ROOT/engine" && uv sync --extra models)
   echo "✓ engine ready ($ROOT/engine/.venv/bin/ontrack-engine)"
+  echo "→ downloading Whisper models (live: large-v3-turbo, saved transcripts: large-v3) — one time, ~4.5 GB"
+  (cd "$ROOT/engine" && uv run hf download mlx-community/whisper-large-v3-turbo >/dev/null && \
+                        uv run hf download mlx-community/whisper-large-v3-mlx >/dev/null)
   if ! ls ~/.cache/huggingface/token >/dev/null 2>&1; then
     echo "→ Log in to Hugging Face once so the app-launched engine can load pyannote:"
     (cd "$ROOT/engine" && uv run hf auth login)

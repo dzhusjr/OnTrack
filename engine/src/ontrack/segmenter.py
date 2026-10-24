@@ -20,6 +20,7 @@ class Segmenter:
         self._max = int(cfg.max_utt_s * SAMPLE_RATE)
         self._search = int(cfg.split_search_s * SAMPLE_RATE)
         self._split_win = cfg.split_window_ms * SAMPLE_RATE // 1000
+        self._post_pad = cfg.post_pad_ms * SAMPLE_RATE // 1000
         self._tol = SAMPLE_RATE // 10  # 100 ms timestamp jitter tolerance before treating as gap/stale
 
         self._pos: int | None = None  # absolute sample index of next unprocessed sample
@@ -70,7 +71,7 @@ class Segmenter:
             if self.vad.speech_prob(np.pad(self._pending, (0, self._win - len(self._pending)))) >= self.cfg.vad_threshold:
                 self._last_speech_end = self._buf_len
             self._pending = np.zeros(0, np.float32)
-        u = self._emit(self._last_speech_end, keep_tail=False)
+        u = self._emit(self._padded_end(), keep_tail=False)
         return [u] if u is not None else []
 
     def open_samples(self) -> np.ndarray | None:
@@ -104,8 +105,9 @@ class Segmenter:
             self._silence_run += len(window)
 
         if self._silence_run >= self._end_silence:
-            trailing = self._concat()[self._last_speech_end :]
-            u = self._emit(self._last_speech_end, keep_tail=False)
+            cut = self._padded_end()
+            trailing = self._concat()[max(cut, 0) :]
+            u = self._emit(cut, keep_tail=False)
             if u is not None:
                 out.append(u)
             self._ring = trailing[-self._pre_pad :]
@@ -114,6 +116,12 @@ class Segmenter:
             if u is not None:
                 out.append(u)
         return out
+
+    def _padded_end(self) -> int:
+        """End of speech plus a little trailing audio (VAD fires slightly before the last syllable ends)."""
+        if self._last_speech_end <= 0:
+            return 0
+        return min(self._last_speech_end + self._post_pad, self._buf_len)
 
     def _append(self, x: np.ndarray) -> None:
         if len(x):
