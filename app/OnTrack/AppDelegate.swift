@@ -40,7 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.settings.autoShowOverlay.toggle()
                 self.store.setAutoShow(self.settings.autoShowOverlay)
             },
-            autoShow: { [weak self] in self?.settings.autoShowOverlay ?? true },
             chooseExportFolder: { [weak self] in
                 guard let self, let folder = Self.pickFolder(title: "Also save every session's notes to…",
                                                              start: self.settings.exportFolder) else { return }
@@ -49,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             clearExportFolder: { [weak self] in self?.settings.exportFolder = nil },
             exportFolderName: { [weak self] in self?.settings.exportFolder?.lastPathComponent },
+            autoShow: { [weak self] in self?.settings.autoShowOverlay ?? true },
             quit: { NSApp.terminate(nil) }
         ))
 
