@@ -45,6 +45,7 @@ public enum OverlayMode: Equatable, Sendable {
 /// Everything the overlay shows (spec §6). Pure value; changed only by `reduce`.
 public struct OverlayState: Equatable {
     public var maxLines: Int
+    public var autoShow = true  // show the live bar automatically when recording starts
     public var mode: OverlayMode = .hidden
     public var lines: [OverlayLine] = []
     public var partials: [PreviewLine] = []  // at most one per channel, mic first
@@ -101,6 +102,7 @@ public enum OverlayEvent: Equatable {
     case questionChanged(String)
     case submitQuestion(id: String)
     case escape
+    case hide
     case choose(FinalizeAction)
     case dismiss
     case clearError
@@ -132,8 +134,10 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.question = ""
         return [.ask(id: id, question: q)]
     case .escape:
-        if s.mode == .expanded { s.mode = .collapsed }
+        if s.mode == .collapsed { s.mode = .hidden } else if s.mode == .expanded { s.mode = .collapsed }
         if s.endCard?.confirmDiscard == true { s.endCard?.confirmDiscard = false }
+    case .hide:
+        if s.mode == .collapsed || s.mode == .expanded { s.mode = .hidden }
     case let .choose(action):
         guard var card = s.endCard, s.mode == .endCard else { return [] }
         if action == .discard && !card.confirmDiscard {
@@ -173,7 +177,7 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         let nowRecording = st.state == "recording" || st.state == "stopping"
         if nowRecording, let sid = st.sessionId, sid != s.sessionId || !s.recording {
             if sid != s.sessionId { s.beginSession(sid) }
-            if s.mode == .hidden || s.mode == .done { s.mode = .collapsed }
+            if s.mode == .done || (s.mode == .hidden && s.autoShow) { s.mode = s.autoShow ? .collapsed : .hidden }
         }
         if st.state == "recording" { s.recording = true }
         if st.state == "idle" { s.recording = false }

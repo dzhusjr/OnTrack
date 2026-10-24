@@ -12,8 +12,14 @@ final class OverlayStore: ObservableObject {
 
     var sendToEngine: ((Outbound) -> Void)?
 
-    init(maxLines: Int) {
-        state = OverlayState(maxLines: maxLines)
+    init(maxLines: Int, autoShow: Bool = true) {
+        var s = OverlayState(maxLines: maxLines)
+        s.autoShow = autoShow
+        state = s
+    }
+
+    func setAutoShow(_ on: Bool) {
+        state.autoShow = on
     }
 
     private var toastClear: DispatchWorkItem?

@@ -26,6 +26,11 @@ struct Settings {
         return v == 0 ? 3 : max(1, min(5, v))
     }
 
+    var autoShowOverlay: Bool {
+        get { defaults.object(forKey: "autoShowOverlay") as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: "autoShowOverlay") }
+    }
+
     var echoCancellation: Bool {
         // Off by default: Apple voice processing fails or returns silence on some Macs (-10875).
         // Enable with: defaults write com.romandzhus.ontrack echoCancellation -bool true

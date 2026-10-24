@@ -196,3 +196,38 @@ final class FinalizeWarningTests: XCTestCase {
         XCTAssertEqual(s.mode, .endCard)  // a real failure lets you retry
     }
 }
+
+final class HideOverlayTests: XCTestCase {
+    private func rec(_ s: inout OverlayState) {
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+    }
+
+    func testEscapeAndHideButtonHideTheLiveBar() {
+        var s = OverlayState()
+        rec(&s)
+        XCTAssertEqual(s.mode, .collapsed)
+        reduce(&s, .escape)
+        XCTAssertEqual(s.mode, .hidden)
+        reduce(&s, .toggle)
+        reduce(&s, .hide)
+        XCTAssertEqual(s.mode, .hidden)
+        XCTAssertTrue(s.recording)  // hiding never stops recording
+    }
+
+    func testNoAutoShowWhenDisabled() {
+        var s = OverlayState()
+        s.autoShow = false
+        rec(&s)
+        XCTAssertEqual(s.mode, .hidden)
+        reduce(&s, .toggle)
+        XCTAssertEqual(s.mode, .collapsed)
+    }
+
+    func testEndCardStillAppearsWhenHidden() {
+        var s = OverlayState()
+        s.autoShow = false
+        rec(&s)
+        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 60, lineCount: 4)))
+        XCTAssertEqual(s.mode, .endCard)
+    }
+}

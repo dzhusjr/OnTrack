@@ -85,6 +85,14 @@ struct OverlayView: View {
     private var statusBadge: some View {
         VStack(alignment: .trailing, spacing: 4) {
             HStack(spacing: 5) {
+                Button {
+                    store.send(.hide)
+                } label: {
+                    Image(systemName: "eye.slash").font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Hide (Esc) — recording continues; ⌥Space shows it again")
                 Circle().fill(s.recording ? Color.red : Color.gray).frame(width: 7, height: 7)
                 if let start = store.recordingStarted {
                     TimelineView(.periodic(from: start, by: 1)) { ctx in

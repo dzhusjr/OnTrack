@@ -6,7 +6,7 @@ import OnTrackCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = Settings()
-    private lazy var store = OverlayStore(maxLines: settings.overlayLines)
+    private lazy var store = OverlayStore(maxLines: settings.overlayLines, autoShow: settings.autoShowOverlay)
     private lazy var client = EngineClient(directory: settings.appSupportDir)
     private lazy var supervisor = EngineSupervisor(engineDir: settings.engineDir, logDir: settings.logsDir)
     private let capture = CaptureService()
@@ -34,6 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openNotes: { [weak self] in self?.open(self?.settings.notesDir) },
             openLogs: { [weak self] in self?.open(self?.settings.logsDir) },
             openConfig: { [weak self] in self?.openConfig() },
+            toggleAutoShow: { [weak self] in
+                guard let self else { return }
+                self.settings.autoShowOverlay.toggle()
+                self.store.setAutoShow(self.settings.autoShowOverlay)
+            },
+            autoShow: { [weak self] in self?.settings.autoShowOverlay ?? true },
             quit: { NSApp.terminate(nil) }
         ))
 
