@@ -61,9 +61,12 @@ def enroll(embedder: Embedder, samples: np.ndarray, out_path: Path, window_s: fl
     if n < 3:
         raise ValueError(f"Need at least {3 * window_s:.0f} s of speech to enroll (got {len(samples) / SAMPLE_RATE:.1f} s)")
     windows = [samples[i * win : (i + 1) * win] for i in range(n)]
-    voiced = [w for w in windows if float(np.sqrt(np.mean(np.square(w, dtype=np.float64)))) >= 0.005]
+    levels = [float(np.sqrt(np.mean(np.square(w, dtype=np.float64)))) for w in windows]
+    # only reject (near-)digital silence: a broken or blocked mic. Real speech on a laptop mic can be ~0.002 RMS.
+    voiced = [w for w, lvl in zip(windows, levels) if lvl >= 0.0008]
     if len(voiced) < 3:
-        raise ValueError("Recording too quiet to enroll — is the microphone working and allowed? Talk normally for 30 s.")
+        raise ValueError(f"Recording too quiet to enroll (level {max(levels):.4f}) — is the microphone working and "
+                         "allowed? Talk normally for 30 s.")
     embs = []
     for w in voiced:
         e = np.asarray(embedder.embed(w), dtype=np.float64)

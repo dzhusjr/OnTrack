@@ -68,3 +68,20 @@ def test_enroll_ignores_silent_windows(tmp_path):  # review: a voiceprint made f
 def test_enroll_rejects_silence(tmp_path):
     with pytest.raises(ValueError, match="quiet"):
         enroll(FakeEmbedder(), np.zeros(30 * 16000, np.float32), tmp_path / "vp.npy")
+
+
+def test_enroll_accepts_quiet_but_real_speech(tmp_path):  # MacBook mic, normal voice, pauses: low RMS but not silence
+    x = tone(30.0, amp=0.003)  # rms ≈ 0.002
+    from fakes import FakeEmbedder as E
+
+    class AnyEmb(E):
+        def embed(self, samples):
+            self.calls += 1
+            return np.array([1.0, 0.0, 0.0])
+
+    assert enroll(AnyEmb(), x, tmp_path / "vp.npy") == pytest.approx(1.0)
+
+
+def test_enroll_error_reports_level(tmp_path):
+    with pytest.raises(ValueError, match=r"level 0\.0000"):
+        enroll(FakeEmbedder(), np.zeros(30 * 16000, np.float32), tmp_path / "vp.npy")
