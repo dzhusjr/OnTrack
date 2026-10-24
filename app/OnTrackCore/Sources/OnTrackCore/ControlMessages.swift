@@ -27,12 +27,14 @@ public struct EngineStatus: Equatable, Sendable {
     public let modelReady: Bool
     public let sessionId: String?
     public let degraded: Bool
+    public let live: Bool  // live transcription on (audio is recorded either way)
 
-    public init(state: String, modelReady: Bool, sessionId: String?, degraded: Bool) {
+    public init(state: String, modelReady: Bool, sessionId: String?, degraded: Bool, live: Bool = true) {
         self.state = state
         self.modelReady = modelReady
         self.sessionId = sessionId
         self.degraded = degraded
+        self.live = live
     }
 }
 
@@ -69,6 +71,7 @@ public enum Inbound: Equatable, Sendable {
         let model_ready: Bool?
         let session_id: String?
         let degraded: Bool?
+        let live: Bool?
         let seq: Int?
         let speaker: String?
         let t_start: Double?
@@ -101,7 +104,7 @@ public enum Inbound: Equatable, Sendable {
         case "pong": return .pong(id: r.id, state: try need(r.state))
         case "status":
             return .status(EngineStatus(state: try need(r.state), modelReady: r.model_ready ?? false,
-                                        sessionId: r.session_id, degraded: r.degraded ?? false))
+                                        sessionId: r.session_id, degraded: r.degraded ?? false, live: r.live ?? true))
         case "line":
             return .line(TranscriptLine(sessionId: r.session_id ?? "", seq: try need(r.seq), speaker: try need(r.speaker),
                                         tStart: try need(r.t_start), tEnd: try need(r.t_end), lang: r.lang ?? "",
@@ -141,9 +144,11 @@ public enum Outbound: Equatable, Sendable {
     case retrySummary(sessionId: String)
     case enrollStart
     case setConfig([String: Double])
+    case setLive(Bool)
 
     public static let typeNames: Set<String> = [
         "ping", "start_session", "stop_session", "ask", "finalize", "retry_summary", "enroll_start", "set_config",
+        "set_live",
     ]
 
     public var jsonObject: [String: Any] {
@@ -156,6 +161,7 @@ public enum Outbound: Equatable, Sendable {
         case let .retrySummary(sid): return ["type": "retry_summary", "session_id": sid]
         case .enrollStart: return ["type": "enroll_start"]
         case let .setConfig(cfg): return ["type": "set_config", "config": cfg]
+        case let .setLive(on): return ["type": "set_live", "enabled": on]
         }
     }
 

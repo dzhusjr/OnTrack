@@ -17,6 +17,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var clearExportFolder: () -> Void
         var exportFolderName: () -> String?
         var autoShow: () -> Bool
+        var toggleLive: () -> Void
+        var toggleBatteryRule: () -> Void
+        var batteryRule: () -> Bool
         var quit: () -> Void
     }
 
@@ -71,6 +74,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         add(menu, state.recording ? "Stop Session" : "Start Session…", #selector(startStop), key: "s", mods: [.option, .shift],
             enabled: canStart)
         add(menu, "Show / Hide Overlay", #selector(toggleOverlay), key: " ", mods: [.option])
+        let live = NSMenuItem(title: "Live Transcription", action: #selector(toggleLive), keyEquivalent: "l")
+        live.keyEquivalentModifierMask = [.option, .shift]
+        live.target = self
+        live.state = state.liveTranscription ? .on : .off
+        menu.addItem(live)
+        let battery = NSMenuItem(title: "On Battery: Record Only", action: #selector(toggleBatteryRule), keyEquivalent: "")
+        battery.target = self
+        battery.state = actions.batteryRule() ? .on : .off
+        menu.addItem(battery)
         let auto = NSMenuItem(title: "Show Live Bar When Recording", action: #selector(toggleAutoShow), keyEquivalent: "")
         auto.target = self
         auto.state = actions.autoShow() ? .on : .off
@@ -115,6 +127,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openLogs() { actions.openLogs() }
     @objc private func openConfig() { actions.openConfig() }
     @objc private func toggleAutoShow() { actions.toggleAutoShow() }
+    @objc private func toggleLive() { actions.toggleLive() }
+    @objc private func toggleBatteryRule() { actions.toggleBatteryRule() }
     @objc private func chooseExportFolder() { actions.chooseExportFolder() }
     @objc private func clearExportFolder() { actions.clearExportFolder() }
     @objc private func quit() { actions.quit() }

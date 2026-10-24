@@ -48,7 +48,9 @@ struct OverlayView: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
                 if s.lines.isEmpty && s.partials.isEmpty {
-                    Text(!s.modelReady ? "Loading speech model…" : (s.recording ? "Listening…" : "Not recording — ⌥⇧S to start"))
+                    Text(!s.modelReady ? "Loading speech model…"
+                         : !s.recording ? "Not recording — ⌥⇧S to start"
+                         : s.liveTranscription ? "Listening…" : "Recording only — transcribed when you save (⌥⇧L for live)")
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
                 let shown = s.visibleLines
@@ -87,6 +89,15 @@ struct OverlayView: View {
         VStack(alignment: .trailing, spacing: 4) {
             HStack(spacing: 5) {
                 Button {
+                    store.toggleLive()
+                } label: {
+                    Image(systemName: s.liveTranscription ? "text.bubble" : "text.bubble.fill").font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(s.liveTranscription ? Color.secondary : Color.orange)
+                .help(s.liveTranscription ? "Pause live transcription (⌥⇧L) — audio keeps recording"
+                                          : "Resume live transcription (⌥⇧L)")
+                Button {
                     store.send(.hide)
                 } label: {
                     Image(systemName: "eye.slash").font(.system(size: 10))
@@ -101,6 +112,9 @@ struct OverlayView: View {
                             .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                     }
                 }
+            }
+            if s.recording && !s.liveTranscription {
+                Text("recording only").font(.system(size: 10)).foregroundStyle(.orange)
             }
             if s.degraded {
                 Text("fast mode").font(.system(size: 10)).foregroundStyle(.orange)

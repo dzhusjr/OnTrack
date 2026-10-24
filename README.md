@@ -27,7 +27,9 @@ Then:
 | Action | How |
 |---|---|
 | Start / stop a session | ⌥⇧S (instant) or menu → Start Session… (asks for a name) |
-| Show / hide overlay | ⌥Space |
+| Show / hide overlay | ⌥Space (or the eye icon on the bar) |
+| Live transcription on/off | ⌥⇧L, the bubble icon on the bar, or menu → Live Transcription. Off = record only; transcribed when you save |
+| Save battery | menu → On Battery: Record Only |
 | Ask about the session | ⌥Space → type → Enter (Esc to collapse) |
 | End of session | overlay card: **Save summary + transcript** (Enter) · Transcript only · Discard (click twice) |
 

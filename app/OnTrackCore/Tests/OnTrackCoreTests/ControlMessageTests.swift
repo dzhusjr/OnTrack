@@ -30,6 +30,7 @@ final class ControlMessageTests: XCTestCase {
             "retry_summary": .retrySummary(sessionId: "2026-10-23-1405-linear-algebra"),
             "enroll_start": .enrollStart,
             "set_config": .setConfig(["tau": 0.6]),
+            "set_live": .setLive(false),
         ]
         var seen = 0
         for line in try goldenLines() {

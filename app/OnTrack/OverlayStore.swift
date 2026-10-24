@@ -12,10 +12,18 @@ final class OverlayStore: ObservableObject {
 
     var sendToEngine: ((Outbound) -> Void)?
 
-    init(maxLines: Int, autoShow: Bool = true) {
+    var onLiveToggled: ((Bool) -> Void)?  // user flipped live transcription (overlay, menu, hotkey)
+
+    init(maxLines: Int, autoShow: Bool = true, live: Bool = true) {
         var s = OverlayState(maxLines: maxLines)
         s.autoShow = autoShow
+        s.liveTranscription = live
         state = s
+    }
+
+    func toggleLive() {
+        send(.toggleLive)
+        onLiveToggled?(state.liveTranscription)
     }
 
     func setAutoShow(_ on: Bool) {

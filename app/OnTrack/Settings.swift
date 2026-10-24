@@ -32,6 +32,18 @@ struct Settings {
         nonmutating set { defaults.set(newValue?.path, forKey: "exportFolder") }
     }
 
+    /// Live transcription when a session starts (off = record only, transcribed when saved).
+    var liveByDefault: Bool {
+        get { defaults.object(forKey: "liveByDefault") as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: "liveByDefault") }
+    }
+
+    /// On battery, record only; live transcription resumes when plugged in.
+    var recordOnlyOnBattery: Bool {
+        get { defaults.object(forKey: "recordOnlyOnBattery") as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: "recordOnlyOnBattery") }
+    }
+
     var autoShowOverlay: Bool {
         get { defaults.object(forKey: "autoShowOverlay") as? Bool ?? true }
         nonmutating set { defaults.set(newValue, forKey: "autoShowOverlay") }

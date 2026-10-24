@@ -6,7 +6,10 @@ import OnTrackCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = Settings()
-    private lazy var store = OverlayStore(maxLines: settings.overlayLines, autoShow: settings.autoShowOverlay)
+    private lazy var store = OverlayStore(maxLines: settings.overlayLines, autoShow: settings.autoShowOverlay,
+                                          live: settings.liveByDefault)
+    private let power = PowerMonitor()
+    private var policyAppliedSession: String?
     private lazy var client = EngineClient(directory: settings.appSupportDir)
     private lazy var supervisor = EngineSupervisor(engineDir: settings.engineDir, logDir: settings.logsDir)
     private let capture = CaptureService()
@@ -49,9 +52,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             clearExportFolder: { [weak self] in self?.settings.exportFolder = nil },
             exportFolderName: { [weak self] in self?.settings.exportFolder?.lastPathComponent },
             autoShow: { [weak self] in self?.settings.autoShowOverlay ?? true },
+            toggleLive: { [weak self] in self?.store.toggleLive() },
+            toggleBatteryRule: { [weak self] in
+                guard let self else { return }
+                self.settings.recordOnlyOnBattery.toggle()
+                self.applyLivePolicy(announce: true)
+            },
+            batteryRule: { [weak self] in self?.settings.recordOnlyOnBattery ?? false },
             quit: { NSApp.terminate(nil) }
         ))
 
+        store.onLiveToggled = { [weak self] on in self?.settings.liveByDefault = on }
+        power.onChange = { [weak self] _ in self?.applyLivePolicy(announce: true) }
+        power.start()
         store.sendToEngine = { [weak self] msg in
             if case let .finalize(sid, _) = msg { self?.lastFinalizeSessionId = sid }
             self?.client.send(msg)
@@ -83,6 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeys.register(id: 2, keyCode: HotkeyService.optionShiftS.keyCode, modifiers: HotkeyService.optionShiftS.modifiers) {
             [weak self] in self?.toggleRecording(askName: false)
+        }
+        hotkeys.register(id: 3, keyCode: HotkeyService.optionShiftL.keyCode, modifiers: HotkeyService.optionShiftL.modifiers) {
+            [weak self] in self?.store.toggleLive()
         }
 
         supervisor.onFatal = { [weak self] text in self?.store.showIssue(text) }
@@ -141,6 +157,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             break
         }
         store.send(.engine(msg))
+        if case let .status(st) = msg, st.state == "recording", let sid = st.sessionId, sid != policyAppliedSession {
+            policyAppliedSession = sid  // new session: apply "live by default" and the battery rule once
+            applyLivePolicy(announce: false)
+        }
+    }
+
+    /// Live transcription on/off from the user's default and the battery rule (recording continues either way).
+    private func applyLivePolicy(announce: Bool) {
+        let onBattery = PowerMonitor.onBattery
+        let desired = LivePolicy.live(preferLive: settings.liveByDefault, onBattery: onBattery,
+                                      recordOnlyOnBattery: settings.recordOnlyOnBattery)
+        guard store.state.recording, desired != store.state.liveTranscription else { return }
+        store.send(.toggleLive)
+        if announce || !desired {
+            store.showToast(desired ? "Live transcription on"
+                            : onBattery && settings.recordOnlyOnBattery ? "On battery — recording only, transcribed when you save"
+                            : "Recording only — transcribed when you save")
+        }
     }
 
     private func connectionChanged(_ up: Bool) {

@@ -46,6 +46,7 @@ public enum OverlayMode: Equatable, Sendable {
 public struct OverlayState: Equatable {
     public var maxLines: Int
     public var autoShow = true  // show the live bar automatically when recording starts
+    public var liveTranscription = true  // off = recording only; transcribed when the session is saved
     public var mode: OverlayMode = .hidden
     public var lines: [OverlayLine] = []
     public var partials: [PreviewLine] = []  // at most one per channel, mic first
@@ -103,6 +104,7 @@ public enum OverlayEvent: Equatable {
     case submitQuestion(id: String)
     case escape
     case hide
+    case toggleLive
     case choose(FinalizeAction)
     case dismiss
     case clearError
@@ -136,6 +138,10 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
     case .escape:
         if s.mode == .collapsed { s.mode = .hidden } else if s.mode == .expanded { s.mode = .collapsed }
         if s.endCard?.confirmDiscard == true { s.endCard?.confirmDiscard = false }
+    case .toggleLive:
+        s.liveTranscription.toggle()
+        if !s.liveTranscription { s.partials = [] }
+        return s.recording ? [.setLive(s.liveTranscription)] : []
     case .hide:
         if s.mode == .collapsed || s.mode == .expanded { s.mode = .hidden }
     case let .choose(action):
@@ -172,6 +178,7 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
     switch msg {
     case let .status(st):
         s.engineState = st.state
+        if st.state == "recording" { s.liveTranscription = st.live }
         s.modelReady = st.modelReady
         s.degraded = st.degraded
         let nowRecording = st.state == "recording" || st.state == "stopping"

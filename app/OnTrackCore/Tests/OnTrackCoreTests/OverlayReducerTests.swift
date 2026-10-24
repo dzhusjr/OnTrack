@@ -269,3 +269,38 @@ final class EmptySessionTests: XCTestCase {
         XCTAssertEqual(s.mode, .hidden)
     }
 }
+
+final class LiveToggleTests: XCTestCase {
+    private func rec(_ s: inout OverlayState, live: Bool = true) {
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false, live: live))))
+    }
+
+    func testToggleLiveSendsCommandAndUpdatesOptimistically() {
+        var s = OverlayState()
+        rec(&s)
+        XCTAssertTrue(s.liveTranscription)
+        XCTAssertEqual(reduce(&s, .toggleLive), [.setLive(false)])
+        XCTAssertFalse(s.liveTranscription)
+        XCTAssertTrue(s.partials.isEmpty)
+        XCTAssertEqual(reduce(&s, .toggleLive), [.setLive(true)])
+        XCTAssertTrue(s.liveTranscription)
+    }
+
+    func testStatusFromEngineWins() {
+        var s = OverlayState()
+        rec(&s, live: false)
+        XCTAssertFalse(s.liveTranscription)
+    }
+
+    func testStatusWithoutLiveFieldMeansOn() throws {
+        let msg = try Inbound.decode(Data(#"{"type":"status","state":"idle","model_ready":true,"session_id":null,"degraded":false}"#.utf8))
+        guard case let .status(st) = msg else { return XCTFail() }
+        XCTAssertTrue(st.live)
+    }
+
+    func testToggleWhileIdleOnlyChangesTheDefault() {
+        var s = OverlayState()
+        XCTAssertEqual(reduce(&s, .toggleLive), [])
+        XCTAssertFalse(s.liveTranscription)
+    }
+}
