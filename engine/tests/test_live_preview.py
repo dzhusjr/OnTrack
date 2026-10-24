@@ -68,3 +68,19 @@ def test_no_partials_while_degraded(tmp_path):
     for f in frames(np.concatenate([tone(3.0), silence(1.0)]), Channel.MIC):
         p.process(f)
     assert [x for x in partials if x[2]] == []
+
+
+def test_no_partials_while_paused_for_lag(tmp_path):
+    p, w, partials, lines, asr = make(tmp_path)
+    p.previews_paused = True
+    for f in frames(np.concatenate([tone(3.0), silence(1.0)]), Channel.MIC):
+        p.process(f)
+    assert [x for x in partials if x[2]] == [] and asr.runs == 1  # only the final decode
+
+
+def test_long_phrase_previews_back_off(tmp_path):
+    p, w, partials, lines, asr = make(tmp_path, preview_interval_s=0.7)
+    for f in frames(np.concatenate([tone(14.0), silence(1.0)]), Channel.MIC):
+        p.process(f)
+    shown = len([x for x in partials if x[2]])
+    assert 5 <= shown <= 13  # a fixed 0.7 s interval would give ~19 full re-decodes

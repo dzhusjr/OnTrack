@@ -84,6 +84,7 @@ class Pipeline:
         self.latencies: list[float] = []
         self._fallback_asr = fallback_asr
         self._degraded = False
+        self.previews_paused = False  # set by the engine while transcription is behind real time
         self._held: list[Utterance] = []  # mic utterances waiting for overlapping system audio
         self._last_text: dict[Channel, tuple[str, float]] = {}  # channel -> (normalized text, t_end)
         self.on_partial = on_partial
@@ -108,14 +109,16 @@ class Pipeline:
         self._maybe_preview(frame.channel, seg)
 
     def _maybe_preview(self, channel: Channel, seg: Segmenter) -> None:
-        if self.on_partial is None or not self.cfg.live_preview or self._degraded:
+        if self.on_partial is None or not self.cfg.live_preview or self._degraded or self.previews_paused:
             return
         start = seg.open_start_s
         if start is None:
             return
         pos = seg.position_s
         last = self._preview_at.get(channel)
-        due = last is None or last[0] != start or pos - last[1] >= self.cfg.preview_interval_s
+        # each preview re-decodes the whole open phrase, so long phrases preview less often
+        interval = max(self.cfg.preview_interval_s, 0.15 * (pos - start))
+        due = last is None or last[0] != start or pos - last[1] >= interval
         if pos - start < self.cfg.preview_min_s or not due:
             return
         self._preview_at[channel] = (start, pos)

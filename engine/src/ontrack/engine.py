@@ -11,6 +11,7 @@ import queue
 import re
 import signal
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -32,6 +33,11 @@ from .types import SAMPLE_RATE, AudioFrame, Channel, Line, Speaker
 log = logging.getLogger("ontrack.engine")
 ENROLL_SECONDS = 30
 _SAFE_ID = re.compile(r"^[^/\\]+$")
+
+
+PREVIEW_PAUSE_LAG_S = 1.5
+PREVIEW_RESUME_LAG_S = 0.5
+DEGRADED_MIN_S = 30.0
 
 
 class LockedAsr:
@@ -297,6 +303,7 @@ class EngineService:
         self._last_note_t = -1e9
         self._enqueued_t = self._processed_t = 0
         self.degraded = False
+        self._degraded_since = 0.0
         self.dropped_frames = 0
         self._dropping_since = None
         self.live = True
@@ -482,14 +489,23 @@ class EngineService:
         lag = (self._enqueued_t - self._processed_t) / 1e9
         if self.pipeline is None:
             return
+        # 1st line of defence: drop the word-by-word preview while behind (it re-decodes open phrases)
+        if not self.pipeline.previews_paused and lag > PREVIEW_PAUSE_LAG_S:
+            self.pipeline.previews_paused = True
+        elif self.pipeline.previews_paused and lag < PREVIEW_RESUME_LAG_S:
+            self.pipeline.previews_paused = False
+        # 2nd: smaller model. Stay in it a while so we don't flap between models every few seconds.
+        now = time.monotonic()
         if not self.degraded and lag > self.cfg.degraded_lag_s and self.fallback_asr is not None:
             self.pipeline.set_degraded(True)
             self.degraded = True
+            self._degraded_since = now
             log.warning("ASR lagging %.1f s — switching to fallback model", lag)
             self._call(self._send_status)
-        elif self.degraded and lag < 2.0:
+        elif self.degraded and lag < 2.0 and now - self._degraded_since >= DEGRADED_MIN_S:
             self.pipeline.set_degraded(False)
             self.degraded = False
+            log.info("ASR caught up — back to the main model")
             self._call(self._send_status)
 
     # ---- background jobs ---------------------------------------------------------------------------
