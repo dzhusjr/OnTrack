@@ -124,5 +124,5 @@ class LangAsr:
 
     def run(self, samples, language, initial_prompt):
         self.calls.append((language, initial_prompt))
-        text, logprob = self.by_lang[language]
+        text, logprob = self.by_lang.get(language, ("", -5.0))
         return Transcript(text, language, logprob, 0.0, 1.0)

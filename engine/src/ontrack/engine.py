@@ -281,6 +281,9 @@ class EngineService:
             self._resume_last_s = None
             log.info("started session %s", self.writer.id)
         self._voiceprint = load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy")
+        if self._voiceprint is None:
+            self._send_now(self._error("no_voiceprint",
+                                       "No voiceprint yet — menu → Enroll My Voice… so your lines show as Me."))
         self.pipeline = None
         self.recorder = None
         self._last_t.clear()
@@ -489,6 +492,7 @@ class EngineService:
                                                   "stage": stage, "pct": round(pct, 3)}),
                     on_summary_error=lambda e: self.send(self._error(
                         "summary_failed", f"Summary failed ({e.code}): {e.message} — use Retry Summary in the menu.")),
+                    on_warning=lambda text: self.send(self._error("diarization_unavailable", text)),
                 )
                 if action == "discard" and self.last_session == session_dir:
                     self.last_session = None

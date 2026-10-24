@@ -10,7 +10,7 @@ def T(text, nsp=0.1, lp=-0.3, cr=1.2):
 
 @pytest.mark.parametrize(
     "text",
-    ["Thanks for watching!", "  Продолжение следует...", "Спасибо за просмотр.", "Дякую за перегляд!", "", "   "],
+    ["Thanks for watching!", "  Продолжение следует...", "Спасибо за просмотр.", "Дякую за перегляд!", "Ondertiteling door de Amara.org gemeenschap", "Bedankt voor het kijken!", "", "   "],
 )
 def test_blocklisted_or_empty(text):
     assert is_hallucination(T(text))

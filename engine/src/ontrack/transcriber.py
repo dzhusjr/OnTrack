@@ -17,7 +17,9 @@ class AsrBackend(Protocol):
 
 
 CONFIDENT = 0.8  # language-ID probability above which we decode once
-TIE_LOGPROB = 0.15  # decodes this close are a tie → earlier language in allowed_langs wins (uk before ru)
+# Whisper's language ID is confidently wrong toward Russian on Ukrainian speech, so a Russian pick is always
+# checked against Ukrainian; a short native anchor prompt keeps Ukrainian spelling from drifting.
+ANCHOR_PROMPTS = {"uk": "Розмова українською мовою.", "nl": "Een gesprek in het Nederlands."}
 
 
 class Transcriber:
@@ -36,16 +38,19 @@ class Transcriber:
     def _prompt(self, channel: Channel, lang: str) -> str | None:
         # only same-language context: a Russian prompt pushes English speech into Russian
         same = [t for l, t in self._ctx(channel) if l is None or l == lang][-self.cfg.context_lines :]
-        return " ".join(same) if same else None
+        return " ".join(same) if same else ANCHOR_PROMPTS.get(lang)
 
     def transcribe(self, u: Utterance) -> Transcript:
         probs = self.backend.detect_language(u.samples)
         allowed = list(self.cfg.allowed_langs)
         ranked = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))
         candidates = ranked[:1] if probs.get(ranked[0], 0.0) >= CONFIDENT or len(ranked) < 2 else ranked[:2]
+        if "ru" in candidates and "uk" in allowed and "uk" not in candidates:
+            candidates.append("uk")
         results = [(l, self.backend.run(u.samples, l, self._prompt(u.channel, l))) for l in candidates]
+        results = [(l, t) for l, t in results if t.text.strip()] or results
         best_lp = max(t.avg_logprob for _, t in results)
-        close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - TIE_LOGPROB]
+        close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - self.cfg.lang_tie_margin]
         lang, best = min(close, key=lambda lt: allowed.index(lt[0]))
         self._last_lang[u.channel] = lang
         return best

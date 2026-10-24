@@ -26,6 +26,9 @@ BLOCKLIST: frozenset[str] = frozenset(
         "субтитры создавал dimatorzok",
         "редактор субтитров а семкин корректор а егорова",
         "дякую за перегляд",
+        "ondertiteling door de amara org gemeenschap",
+        "ondertiteld door de amara org gemeenschap",
+        "bedankt voor het kijken",
     )
 )
 

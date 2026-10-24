@@ -86,6 +86,10 @@ def typ(t):
     return lambda m: m["type"] == t
 
 
+def err(code):
+    return lambda m: m["type"] == "error" and m["code"] == code
+
+
 async def run_with(service, body):
     task = asyncio.create_task(service.serve())
     try:
@@ -166,8 +170,8 @@ def test_ask_streams_answer_and_failure_reports_error(dirs):
         assert d1["text"] + d2["text"] == "It is Friday"
         assert (await c.expect(typ("answer_done")))["id"] == "q1"
         await c.send({"type": "ask", "id": "q2", "question": "Again?"})
-        err = await c.expect(typ("error"))
-        assert err["code"] == "llm_missing" and err["recoverable"] is True
+        e = await c.expect(err("llm_missing"))
+        assert e["recoverable"] is True
         assert (await c.expect(typ("answer_done")))["id"] == "q2"
         await c.close()
 
@@ -244,8 +248,7 @@ def test_unknown_message_returns_error(dirs):
     async def body():
         c = await Client(cfg).connect()
         await c.send({"type": "fly"})
-        err = await c.expect(typ("error"))
-        assert err["code"] == "bad_message"
+        await c.expect(err("bad_message"))
         await c.close()
 
     asyncio.run(run_with(svc, body))
@@ -291,8 +294,8 @@ def test_summary_failure_reported_before_finalize_done(dirs):  # review M2 #5
         await c.send({"type": "stop_session"})
         await c.expect(typ("session_stopped"))
         await c.send({"type": "finalize", "session_id": st["session_id"], "action": "save_all"})
-        err = await c.expect(typ("error"))
-        assert err["code"] == "summary_failed" and "log in" in err["message"]
+        e = await c.expect(err("summary_failed"))
+        assert "log in" in e["message"]
         await c.expect(typ("finalize_done"))
         await c.close()
 
@@ -316,7 +319,7 @@ def test_finalize_previous_session_while_recording_next(dirs):  # review M2 #6
         done = await c.expect(typ("finalize_done"))
         assert done["session_id"] == a and done["notes_path"]
         await c.send({"type": "finalize", "session_id": "../../etc", "action": "discard"})
-        assert (await c.expect(typ("error")))["code"] == "no_session"
+        await c.expect(err("no_session"))
         await c.close()
 
     asyncio.run(run_with(svc, body))
@@ -381,6 +384,19 @@ def test_partial_messages_reach_the_app(dirs):
         assert part["session_id"] == st["session_id"] and part["channel"] == 0
         await c.expect(lambda m: m["type"] == "partial" and m["text"] == "")
         await c.expect(typ("line"))
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+
+
+def test_missing_voiceprint_is_reported_on_start(dirs):
+    svc, cfg = make_service(dirs)
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        e = await c.expect(err("no_voiceprint"))
+        assert "Enroll" in e["message"]
         await c.close()
 
     asyncio.run(run_with(svc, body))

@@ -77,3 +77,35 @@ def test_missing_audio_keeps_live_transcript(tmp_path):
     out = postprocess(w.dir, tmp_path / "nothing", FakeDiarizer(SEGS), FakeEmbedder(), ME_VP, None, load_config(None))
     assert [l.speaker for l in out] == ["Me", "Other", "Other", "Them", "Note"]
     assert isinstance(out[0], FinalLine)
+
+
+def setup_two_speakers_one_line(tmp_path):
+    """One live line 0-6 s that actually contains Roman (0-3 s, amp 0.3) then person X (3-6 s, amp 0.5)."""
+    w = SessionWriter.start(tmp_path / "sessions", "S", NOW)
+    rec = AudioRecorder(tmp_path / "audio", origin_ns=0)
+    for f in frames(np.concatenate([tone(3, 0.3), tone(3, 0.5), silence(2)]), Channel.MIC):
+        rec.write(f)
+    rec.close()
+    w.append(Speaker.OTHER, 0, 6, "en", "both speakers merged live")
+    return w
+
+
+def test_final_transcript_is_rebuilt_per_speaker_turn(tmp_path):
+    w = setup_two_speakers_one_line(tmp_path)
+    asr = FakeAsr([({"en": 1}, tr("i can do the slides")), ({"uk": 1}, tr("також треба забронювати", lang="uk"))])
+    segs = [(0.0, 1.4, "S1"), (1.5, 3.0, "S1"), (3.0, 3.2, "S9"), (3.2, 6.0, "S0")]  # S1 split by a short gap; S9 = 0.2 s blip
+    out = postprocess(w.dir, tmp_path / "audio", FakeDiarizer(segs), FakeEmbedder(), ME_VP,
+                      Transcriber(asr, load_config(None)), load_config(None))
+    assert [(l.speaker, l.text, l.lang) for l in out] == [
+        ("Me", "i can do the slides", "en"),
+        ("Speaker A", "також треба забронювати", "uk"),
+    ]
+    assert out[0].t_start == 0.0 and out[1].t_start == 3.2
+
+
+def test_diarization_failure_is_reported(tmp_path):
+    w = setup(tmp_path)
+    warnings = []
+    postprocess(w.dir, tmp_path / "audio", FakeDiarizer(error=RuntimeError("403 gated repo")), FakeEmbedder(), ME_VP,
+                None, load_config(None), on_warning=warnings.append)
+    assert warnings and "403" in warnings[0]

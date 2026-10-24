@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import Config
 from .session import read_lines
 
-LANG_NAMES = {"en": "English", "ru": "Russian", "uk": "Ukrainian"}
+LANG_NAMES = {"en": "English", "nl": "Dutch", "ru": "Russian", "uk": "Ukrainian"}
 
 
 def _read(path: Path) -> str:

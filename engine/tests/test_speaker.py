@@ -56,3 +56,15 @@ def test_enroll_too_short(tmp_path):
 
 def test_load_voiceprint_missing_is_none(tmp_path):
     assert load_voiceprint(tmp_path / "nope.npy") is None
+
+
+def test_enroll_ignores_silent_windows(tmp_path):  # review: a voiceprint made from silence matches nobody
+    x = np.concatenate([np.zeros(6 * 16000, np.float32), tone(9.0, amp=0.3)])
+    score = enroll(FakeEmbedder(), x, tmp_path / "vp.npy")
+    assert score == pytest.approx(1.0)
+    assert np.allclose(load_voiceprint(tmp_path / "vp.npy"), [1.0, 0, 0])
+
+
+def test_enroll_rejects_silence(tmp_path):
+    with pytest.raises(ValueError, match="quiet"):
+        enroll(FakeEmbedder(), np.zeros(30 * 16000, np.float32), tmp_path / "vp.npy")

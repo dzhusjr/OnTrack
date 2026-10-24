@@ -16,7 +16,8 @@ class Config:
     max_utt_s: float = 15.0
     split_search_s: float = 3.0
     split_window_ms: int = 100
-    allowed_langs: tuple[str, ...] = ("en", "uk", "ru")  # order breaks ties: uk before ru
+    allowed_langs: tuple[str, ...] = ("en", "nl", "uk", "ru")  # order breaks ties: uk before ru
+    lang_tie_margin: float = 0.35  # decodes within this avg-logprob of the best count as a tie
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
     context_lines: int = 2
     short_utt_s: float = 1.0

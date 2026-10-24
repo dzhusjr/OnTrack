@@ -76,6 +76,23 @@ def _cluster_names(segments, mic: np.ndarray, embedder: Embedder, voiceprint, cf
     return names
 
 
+def _turns(segments, min_s: float = 0.4, merge_gap: float = 0.5) -> list[tuple[float, float, str]]:
+    """Speaker turns: drop blips shorter than min_s, merge same-speaker segments separated by short gaps."""
+    turns: list[tuple[float, float, str]] = []
+    for s0, s1, label in sorted(segments):
+        if s1 - s0 < min_s:
+            continue
+        if turns and turns[-1][2] == label and s0 - turns[-1][1] <= merge_gap:
+            turns[-1] = (turns[-1][0], max(turns[-1][1], s1), label)
+        else:
+            turns.append((s0, s1, label))
+    return turns
+
+
+def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
 def _best_cluster(segments, t0: float, t1: float) -> str | None:
     best, best_ov = None, 0.0
     for s0, s1, label in segments:
@@ -94,6 +111,7 @@ def postprocess(
     transcriber,
     cfg: Config,
     progress: Callable[[str, float], None] | None = None,
+    on_warning: Callable[[str], None] | None = None,
 ) -> list[FinalLine]:
     session_dir = Path(session_dir)
     report = progress or (lambda stage, pct: None)
@@ -106,11 +124,22 @@ def postprocess(
     segments: list[tuple[float, float, str]] = []
     if len(mic):
         try:
-            segments = list(diarizer.diarize(mic))
+            segments = _turns(diarizer.diarize(mic))
             names = _cluster_names(segments, mic, embedder, voiceprint, cfg)
         except Exception as e:  # spec §8: fall back to live labels
             log.warning("diarization failed, keeping live labels: %s", e)
             segments, names = [], {}
+            msg = f"Speaker separation unavailable, kept live labels: {e}"
+            if "403" in str(e) or "gated" in str(e).lower():
+                msg = ("Speaker separation unavailable: accept the model terms at huggingface.co/pyannote/segmentation-3.0 "
+                       f"and huggingface.co/pyannote/speaker-diarization-3.1 ({str(e).splitlines()[0]})")
+            if on_warning:
+                on_warning(msg)
+
+    if segments and transcriber is not None and cfg.retranscribe:
+        final = _rebuild_by_turns(lines, segments, names, mic, system, transcriber, report)
+        _write_final(session_dir, final)
+        return final
 
     final: list[FinalLine] = []
     for line in lines:
@@ -138,6 +167,43 @@ def postprocess(
 
     _write_final(session_dir, final)
     return final
+
+
+def _rebuild_by_turns(lines, turns, names, mic, system, transcriber, report) -> list[FinalLine]:
+    """Mic speech is re-transcribed per diarized speaker turn (so two people talking without a pause, or in
+    different languages, become separate lines); call audio and notes keep their live segmentation."""
+    out: list[FinalLine] = []
+    work = len(turns) + sum(1 for l in lines if l.speaker == Speaker.THEM)
+    done = 0
+    for t0, t1, label in turns:
+        report("retranscribing", done / max(1, work))
+        done += 1
+        audio = _span(mic, t0, t1)
+        if len(audio) < SAMPLE_RATE // 4:
+            continue
+        t = transcriber.transcribe(Utterance(Channel.MIC, t0, t1, audio))
+        if t.text.strip() and not is_hallucination(t):
+            out.append(FinalLine(0, names.get(label, Speaker.OTHER.value), t0, t1, t.lang, t.text.strip()))
+    for line in lines:
+        if line.speaker == Speaker.THEM:
+            report("retranscribing", done / max(1, work))
+            done += 1
+            text, lang = line.text, line.lang
+            audio = _span(system, line.t_start, line.t_end)
+            if len(audio) >= SAMPLE_RATE // 4:
+                t = transcriber.transcribe(Utterance(Channel.SYSTEM, line.t_start, line.t_end, audio))
+                if t.text.strip() and not is_hallucination(t):
+                    text, lang = t.text.strip(), t.lang
+            out.append(FinalLine(0, line.speaker.value, line.t_start, line.t_end, lang, text))
+        elif line.speaker == Speaker.NOTE:
+            out.append(FinalLine(0, line.speaker.value, line.t_start, line.t_end, line.lang, line.text))
+        else:  # live mic line the diarizer missed entirely: keep it rather than lose speech
+            covered = sum(_overlap(line.t_start, line.t_end, a, b) for a, b, _ in turns)
+            if covered < 0.3 * max(1e-6, line.t_end - line.t_start):
+                out.append(FinalLine(0, line.speaker.value, line.t_start, line.t_end, line.lang, line.text))
+    report("retranscribing", 1.0)
+    out.sort(key=lambda l: (l.t_start, l.t_end))
+    return [FinalLine(i, l.speaker, l.t_start, l.t_end, l.lang, l.text) for i, l in enumerate(out)]
 
 
 def _write_final(session_dir: Path, final: list[FinalLine]) -> None:

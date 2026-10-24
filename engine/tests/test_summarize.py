@@ -28,3 +28,7 @@ def test_summarize_writes_summary_md_preferring_final_transcript(tmp_path):
     out = summarize(runner, w.dir, load_config(None))
     assert out == "# Summary\nTL;DR: ok" and (w.dir / "summary.md").read_text() == out
     assert "FINAL TEXT" in runner.prompts[0] and "live text" not in runner.prompts[0]
+
+
+def test_dutch_summary_language_name():
+    assert "Dutch" in build_summary_prompt("T", "N", "Q", "nl")

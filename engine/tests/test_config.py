@@ -7,7 +7,7 @@ from ontrack.config import load_config
 
 def test_defaults():
     c = load_config(None)
-    assert c.tau == 0.55 and c.allowed_langs == ("en", "uk", "ru") and c.max_utt_s == 15.0
+    assert c.tau == 0.55 and c.allowed_langs == ("en", "nl", "uk", "ru") and c.max_utt_s == 15.0
 
 
 def test_toml_overrides(tmp_path):

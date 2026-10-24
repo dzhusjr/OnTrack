@@ -41,6 +41,7 @@ def finalize(
     deps: FinalizeDeps,
     progress: Callable[[str, float], None],
     on_summary_error: Callable[[LlmError], None] | None = None,
+    on_warning: Callable[[str], None] | None = None,
 ) -> Path | None:
     if action not in ACTIONS:
         raise ValueError(f"unknown finalize action {action!r}")
@@ -53,7 +54,7 @@ def finalize(
 
     try:
         postprocess(session_dir, audio_dir, deps.diarizer, deps.embedder, deps.voiceprint, deps.transcriber,
-                    deps.cfg, progress=lambda s, p: progress(s, 0.05 + 0.6 * p))
+                    deps.cfg, progress=lambda s, p: progress(s, 0.05 + 0.6 * p), on_warning=on_warning)
     except Exception as e:  # never lose the transcript because post-processing broke
         log.exception("post-processing failed: %s", e)
 
