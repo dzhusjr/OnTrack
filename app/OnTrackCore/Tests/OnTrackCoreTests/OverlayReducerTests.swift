@@ -182,3 +182,17 @@ final class LivePreviewTests: XCTestCase {
         XCTAssertTrue(s.partials.isEmpty)
     }
 }
+
+final class FinalizeWarningTests: XCTestCase {
+    func testWarningsDuringSaveDoNotReopenTheEndCard() {
+        var s = OverlayState()
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 180, lineCount: 39)))
+        reduce(&s, .choose(.saveAll))
+        reduce(&s, .engine(.error(EngineError(code: "diarization_unavailable", message: "403", recoverable: true))))
+        XCTAssertEqual(s.mode, .finalizing)  // saving continues; the warning is only shown
+        XCTAssertEqual(s.error, "403")
+        reduce(&s, .engine(.error(EngineError(code: "finalize_failed", message: "disk full", recoverable: true))))
+        XCTAssertEqual(s.mode, .endCard)  // a real failure lets you retry
+    }
+}

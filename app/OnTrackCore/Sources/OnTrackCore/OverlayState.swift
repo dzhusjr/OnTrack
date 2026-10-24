@@ -212,7 +212,8 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         s.toast = String(format: "Voiceprint saved (match %.2f)", score)
     case let .error(err):
         s.error = err.message
-        if s.mode == .finalizing { s.mode = .endCard }
+        // only a failed save reopens the card; warnings (speaker separation, summary) arrive while saving continues
+        if s.mode == .finalizing && err.code == "finalize_failed" { s.mode = .endCard }
     case .pong, .unknown:
         break
     }
