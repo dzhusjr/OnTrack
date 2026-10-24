@@ -5,6 +5,16 @@ import os
 
 import numpy as np
 
+
+def _stored_token() -> str | None:
+    """Token saved by `hf auth login`. Passed explicitly: pyannote treats token=None as anonymous for gated repos."""
+    try:
+        from huggingface_hub import get_token
+
+        return get_token()
+    except Exception:
+        return None
+
 MODEL_ID = "pyannote/wespeaker-voxceleb-resnet34-LM"
 
 
@@ -13,7 +23,7 @@ class PyannoteEmbedder:
         import torch
         from pyannote.audio import Inference, Model
 
-        token = token if token is not None else os.environ.get("HF_TOKEN")
+        token = token or os.environ.get("HF_TOKEN") or _stored_token()
         try:
             model = Model.from_pretrained(MODEL_ID, token=token)  # pyannote >= 4
         except TypeError:

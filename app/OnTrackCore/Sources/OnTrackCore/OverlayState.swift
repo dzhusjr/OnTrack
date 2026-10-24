@@ -199,6 +199,12 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
     case let .sessionStopped(sid, duration, count):
         s.recording = false
         s.partials = []
+        if count == 0 && duration < 10 {  // accidental start/stop: nothing to save, don't ask
+            s.endCard = nil
+            s.mode = .hidden
+            s.toast = "Empty session discarded"
+            return [.finalize(sessionId: sid, action: .discard)]
+        }
         s.endCard = EndCard(sessionId: sid, durationS: duration, lineCount: count, confirmDiscard: false)
         s.mode = .endCard
     case let .finalizeProgress(_, stage, pct):

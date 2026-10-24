@@ -231,3 +231,41 @@ final class HideOverlayTests: XCTestCase {
         XCTAssertEqual(s.mode, .endCard)
     }
 }
+
+final class EmptySessionTests: XCTestCase {
+    private func rec(_ s: inout OverlayState) {
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+    }
+
+    func testEmptyShortSessionIsDiscardedWithoutACard() {
+        var s = OverlayState()
+        rec(&s)
+        let cmds = reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 1, lineCount: 0)))
+        XCTAssertEqual(cmds, [.finalize(sessionId: "s1", action: .discard)])
+        XCTAssertNil(s.endCard)
+        XCTAssertEqual(s.mode, .hidden)
+        XCTAssertEqual(s.toast, "Empty session discarded")
+    }
+
+    func testSessionWithLinesStillGetsTheCard() {
+        var s = OverlayState()
+        rec(&s)
+        XCTAssertEqual(reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 2, lineCount: 1))), [])
+        XCTAssertEqual(s.mode, .endCard)
+    }
+
+    func testLongSilentSessionStillGetsTheCard() {  // 0 lines after minutes: probably a mic problem, let the user decide
+        var s = OverlayState()
+        rec(&s)
+        XCTAssertEqual(reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 300, lineCount: 0))), [])
+        XCTAssertEqual(s.mode, .endCard)
+    }
+
+    func testDiscardResultDoesNotShowTheDoneCard() {
+        var s = OverlayState()
+        rec(&s)
+        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 1, lineCount: 0)))
+        reduce(&s, .engine(.finalizeDone(sessionId: "s1", notesPath: "")))
+        XCTAssertEqual(s.mode, .hidden)
+    }
+}
