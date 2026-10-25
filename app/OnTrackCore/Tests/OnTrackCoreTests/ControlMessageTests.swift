@@ -31,6 +31,7 @@ final class ControlMessageTests: XCTestCase {
             "enroll_start": .enrollStart,
             "set_config": .setConfig(["tau": 0.6]),
             "set_live": .setLive(false),
+            "set_paused": .setPaused(true),
         ]
         var seen = 0
         for line in try goldenLines() {

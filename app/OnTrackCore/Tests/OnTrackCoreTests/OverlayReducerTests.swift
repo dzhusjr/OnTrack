@@ -85,6 +85,24 @@ final class OverlayReducerTests: XCTestCase {
         XCTAssertEqual(s.mode, .collapsed)
     }
 
+    func testPauseOnlyWhileRecordingAndFollowsEngine() {
+        var s = OverlayState()
+        XCTAssertEqual(reduce(&s, .togglePause), [])  // idle: nothing to pause
+        recording(&s)
+        reduce(&s, .engine(.partial(sessionId: "s1", channel: 0, tStart: 1, text: "hal")))
+        XCTAssertEqual(reduce(&s, .togglePause), [.setPaused(true)])
+        XCTAssertTrue(s.paused)
+        XCTAssertTrue(s.partials.isEmpty)
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false,
+                                                paused: true))))
+        XCTAssertTrue(s.paused)
+        XCTAssertEqual(reduce(&s, .togglePause), [.setPaused(false)])
+        XCTAssertFalse(s.paused)
+        reduce(&s, .togglePause)
+        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 100, lineCount: 3)))
+        XCTAssertFalse(s.paused)  // a new session never starts paused
+    }
+
     func testEndOfSessionSaveFlow() {
         var s = OverlayState()
         recording(&s)

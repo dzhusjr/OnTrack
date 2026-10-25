@@ -104,6 +104,8 @@ class EngineService:
         self.dropped_frames = 0
         self._dropping_since: float | None = None
         self.live = True  # live transcription on; audio is recorded either way
+        self.paused = False  # recording paused: audio is dropped, nothing saved
+        self._rec_pause_start: float | None = None
         self._pause_start: float | None = None
 
     # ---- paths ------------------------------------------------------------------
@@ -189,7 +191,7 @@ class EngineService:
         self._send_now({
             "type": "status", "state": self.state, "model_ready": self.model_ready,
             "session_id": self.writer.id if self.writer and self.state in ("recording", "stopping") else None,
-            "degraded": self.degraded, "live": self.live,
+            "degraded": self.degraded, "live": self.live, "paused": self.paused,
         })
 
     def _set_state(self, state: str) -> None:
@@ -264,6 +266,8 @@ class EngineService:
                 self._set_state("enrolling")
         elif t == "set_live":
             self._set_live(bool(msg["enabled"]))
+        elif t == "set_paused":
+            self._set_paused(bool(msg["paused"]))
         elif t == "set_config":
             try:
                 self.cfg = apply_overrides(self.cfg, msg["config"])
@@ -308,6 +312,8 @@ class EngineService:
         self._dropping_since = None
         self.live = True
         self._pause_start = None
+        self.paused = False
+        self._rec_pause_start = None
         self._set_state("recording")
 
     def _session_now(self) -> float | None:
@@ -352,7 +358,34 @@ class EngineService:
             log.exception("could not read transcript for duration")
         return max(candidates)
 
+    def _set_paused(self, paused: bool) -> None:
+        """Pause = nothing is recorded or transcribed (audio is dropped); the timeline keeps running."""
+        if self.state != "recording" or self.writer is None or paused == self.paused:
+            self._send_status()
+            return
+        self.paused = paused
+        now = self._session_now()
+        if paused:
+            self._rec_pause_start = now if now is not None else 0.0
+            self._work.put(("flush", None))  # finish the phrase in progress
+        else:
+            self._end_recording_pause(now)
+        log.info("recording %s", "paused" if paused else "resumed")
+        self._send_status()
+
+    def _end_recording_pause(self, now: float | None) -> None:
+        if self._rec_pause_start is None:
+            return
+        start = self._rec_pause_start
+        end = now if now is not None else start
+        self._rec_pause_start = None
+        self._last_note_t = end  # the jump in time is the pause, not a capture gap
+        self._work.put(("note", (start, f"[recording paused {_mmss(end - start)}]")))
+
     async def _stop_session(self, notify: bool) -> None:
+        if self.paused:
+            self._end_recording_pause(self._session_now())
+            self.paused = False
         if not self.live and self._pause_start is not None and self.writer is not None:
             end = self._session_now() or self._pause_start
             self.writer.add_paused(self._pause_start, end)
@@ -434,6 +467,8 @@ class EngineService:
                 self._last_note_t = gap_start
                 self._work.put(("note", (gap_start, f"[gap {_mmss((f.t_ns - last) / 1e9)}]")))
         self._last_t[f.channel] = f.t_ns
+        if self.paused:
+            return  # paused: keep the clock, drop the audio (the recorder pads the gap with silence)
         try:
             self.recorder.write(f)
         except Exception:

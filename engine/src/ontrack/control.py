@@ -17,6 +17,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "enroll_start": (),
     "set_config": ("config",),
     "set_live": ("enabled",),  # live transcription on/off; audio keeps recording either way
+    "set_paused": ("paused",),  # pause/resume recording; nothing is captured while paused
     # engine -> app
     "pong": ("state",),
     "status": ("state", "model_ready", "session_id", "degraded"),

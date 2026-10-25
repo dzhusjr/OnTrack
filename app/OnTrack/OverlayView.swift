@@ -50,6 +50,7 @@ struct OverlayView: View {
                 if s.lines.isEmpty && s.partials.isEmpty {
                     Text(!s.modelReady ? "Loading speech model…"
                          : !s.recording ? "Not recording — ⌥⇧S to start"
+                         : s.paused ? "Paused — nothing is recorded (⌥⇧P to resume)"
                          : s.liveTranscription ? "Listening…" : "Recording only — transcribed when you save (⌥⇧L for live)")
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
@@ -105,7 +106,12 @@ struct OverlayView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("Hide (Esc) — recording continues; ⌥Space shows it again")
-                Circle().fill(s.recording ? Color.red : Color.gray).frame(width: 7, height: 7)
+                if s.recording && s.paused {
+                    Image(systemName: "pause.fill").font(.system(size: 8)).foregroundStyle(.orange)
+                        .help("Paused — ⌥⇧P to resume")
+                } else {
+                    Circle().fill(s.recording ? Color.red : Color.gray).frame(width: 7, height: 7)
+                }
                 if let start = store.recordingStarted {
                     TimelineView(.periodic(from: start, by: 1)) { ctx in
                         Text(Self.elapsed(from: start, to: ctx.date))
@@ -113,7 +119,9 @@ struct OverlayView: View {
                     }
                 }
             }
-            if s.recording && !s.liveTranscription {
+            if s.recording && s.paused {
+                Text("paused").font(.system(size: 10)).foregroundStyle(.orange)
+            } else if s.recording && !s.liveTranscription {
                 Text("recording only").font(.system(size: 10)).foregroundStyle(.orange)
             }
             if s.degraded {

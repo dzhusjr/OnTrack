@@ -47,6 +47,7 @@ public struct OverlayState: Equatable {
     public var maxLines: Int
     public var autoShow = true  // show the live bar automatically when recording starts
     public var liveTranscription = true  // off = recording only; transcribed when the session is saved
+    public var paused = false  // recording paused: nothing captured until resumed
     public var mode: OverlayMode = .hidden
     public var lines: [OverlayLine] = []
     public var partials: [PreviewLine] = []  // at most one per channel, mic first
@@ -105,6 +106,7 @@ public enum OverlayEvent: Equatable {
     case escape
     case hide
     case toggleLive
+    case togglePause
     case deferredUntilPower
     case choose(FinalizeAction)
     case dismiss
@@ -146,6 +148,11 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.progress = nil
         s.mode = s.recording ? .collapsed : .hidden
         s.toast = "Saved — transcription will finish when your Mac is plugged in"
+    case .togglePause:
+        guard s.recording else { return [] }
+        s.paused.toggle()
+        if s.paused { s.partials = [] }
+        return [.setPaused(s.paused)]
     case .toggleLive:
         s.liveTranscription.toggle()
         if !s.liveTranscription { s.partials = [] }
@@ -186,7 +193,8 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
     switch msg {
     case let .status(st):
         s.engineState = st.state
-        if st.state == "recording" { s.liveTranscription = st.live }
+        if st.state == "recording" { s.liveTranscription = st.live; s.paused = st.paused }
+        if st.state == "idle" { s.paused = false }
         s.modelReady = st.modelReady
         s.degraded = st.degraded
         let nowRecording = st.state == "recording" || st.state == "stopping"
@@ -213,6 +221,7 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         if id == s.askId { s.asking = false }
     case let .sessionStopped(sid, duration, count):
         s.recording = false
+        s.paused = false
         s.partials = []
         if count == 0 && duration < 10 {  // accidental start/stop: nothing to save, don't ask
             s.endCard = nil

@@ -28,13 +28,16 @@ public struct EngineStatus: Equatable, Sendable {
     public let sessionId: String?
     public let degraded: Bool
     public let live: Bool  // live transcription on (audio is recorded either way)
+    public let paused: Bool  // recording paused: nothing is captured
 
-    public init(state: String, modelReady: Bool, sessionId: String?, degraded: Bool, live: Bool = true) {
+    public init(state: String, modelReady: Bool, sessionId: String?, degraded: Bool, live: Bool = true,
+                paused: Bool = false) {
         self.state = state
         self.modelReady = modelReady
         self.sessionId = sessionId
         self.degraded = degraded
         self.live = live
+        self.paused = paused
     }
 }
 
@@ -72,6 +75,7 @@ public enum Inbound: Equatable, Sendable {
         let session_id: String?
         let degraded: Bool?
         let live: Bool?
+        let paused: Bool?
         let seq: Int?
         let speaker: String?
         let t_start: Double?
@@ -104,7 +108,8 @@ public enum Inbound: Equatable, Sendable {
         case "pong": return .pong(id: r.id, state: try need(r.state))
         case "status":
             return .status(EngineStatus(state: try need(r.state), modelReady: r.model_ready ?? false,
-                                        sessionId: r.session_id, degraded: r.degraded ?? false, live: r.live ?? true))
+                                        sessionId: r.session_id, degraded: r.degraded ?? false, live: r.live ?? true,
+                                        paused: r.paused ?? false))
         case "line":
             return .line(TranscriptLine(sessionId: r.session_id ?? "", seq: try need(r.seq), speaker: try need(r.speaker),
                                         tStart: try need(r.t_start), tEnd: try need(r.t_end), lang: r.lang ?? "",
@@ -145,10 +150,11 @@ public enum Outbound: Equatable, Sendable {
     case enrollStart
     case setConfig([String: Double])
     case setLive(Bool)
+    case setPaused(Bool)
 
     public static let typeNames: Set<String> = [
         "ping", "start_session", "stop_session", "ask", "finalize", "retry_summary", "enroll_start", "set_config",
-        "set_live",
+        "set_live", "set_paused",
     ]
 
     public var jsonObject: [String: Any] {
@@ -162,6 +168,7 @@ public enum Outbound: Equatable, Sendable {
         case .enrollStart: return ["type": "enroll_start"]
         case let .setConfig(cfg): return ["type": "set_config", "config": cfg]
         case let .setLive(on): return ["type": "set_live", "enabled": on]
+        case let .setPaused(on): return ["type": "set_paused", "paused": on]
         }
     }
 

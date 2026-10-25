@@ -121,6 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeys.register(id: 3, keyCode: HotkeyService.optionShiftL.keyCode, modifiers: HotkeyService.optionShiftL.modifiers) {
             [weak self] in self?.store.toggleLive()
         }
+        hotkeys.register(id: 4, keyCode: HotkeyService.optionShiftP.keyCode, modifiers: HotkeyService.optionShiftP.modifiers) {
+            [weak self] in self?.togglePause()
+        }
 
         supervisor.onFatal = { [weak self] text in self?.store.showIssue(text) }
         supervisor.start()
@@ -158,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let sid = resumeSessionId {
                 if st.state == "recording", st.sessionId == sid {
                     resumeSessionId = nil
+                    if store.state.paused { client.send(.setPaused(true)) }  // a restarted engine forgot the pause
                     client.releaseAudio()
                 } else {
                     return  // fresh engine still idle: don't let it end our session in the UI
@@ -236,6 +240,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: actions
+
+    private func togglePause() {
+        guard store.state.recording else { return }
+        store.send(.togglePause)
+        store.showToast(store.state.paused ? "Paused — nothing is recorded (⌥⇧P to resume)" : "Recording resumed")
+    }
 
     private func toggleRecording(askName: Bool) {
         if store.state.recording {

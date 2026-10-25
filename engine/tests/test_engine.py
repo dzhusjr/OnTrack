@@ -488,3 +488,50 @@ def test_live_transcription_can_be_paused_while_audio_keeps_recording(dirs):
         await c.close()
 
     asyncio.run(run_with(svc, body))
+
+
+def test_pause_recording_drops_audio_and_notes_the_pause(dirs):
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("first")), ({"en": 1}, tr("after resume"))])
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "L"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        assert st.get("paused") is False
+        await c.audio(frames(SPEECH, Channel.MIC))
+        await c.expect(lambda m: m["type"] == "line" and m["text"] == "first")
+        await c.send({"type": "set_paused", "paused": True})
+        await c.expect(lambda m: m["type"] == "status" and m.get("paused") is True)
+        loud = tone(20.0, 0.5)  # spoken while paused: must never be recorded or transcribed
+        await c.audio(frames(loud, Channel.MIC, start_ns=2_500_000_000))
+        await asyncio.sleep(0.5)  # audio and control are separate sockets
+        await c.send({"type": "set_paused", "paused": False})
+        note = await c.expect(lambda m: m["type"] == "line" and m["speaker"] == "Note")
+        assert note["text"].startswith("[recording paused 00:2")
+        await c.audio(frames(SPEECH, Channel.MIC, start_ns=23_000_000_000))
+        line = await c.expect(lambda m: m["type"] == "line" and m["speaker"] != "Note")
+        assert line["text"] == "after resume" and line["t_start"] == pytest.approx(23.0, abs=0.3)
+        await c.send({"type": "stop_session"})
+        stopped = await c.expect(typ("session_stopped"))
+        assert stopped["line_count"] == 3  # first, pause note, after resume (no "[gap]" note)
+        from ontrack.recorder import load_channel
+
+        mic = load_channel(cfg.app_support_dir / "audio" / st["session_id"], Channel.MIC)
+        paused = mic[int(3.0 * 16000):int(22.0 * 16000)]
+        assert len(mic) >= 25 * 16000 and float(np.abs(paused).max()) == 0.0  # silence, timeline kept
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+
+
+def test_set_paused_when_idle_is_harmless(dirs):
+    svc, cfg = make_service(dirs)
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "set_paused", "paused": True})
+        st = await c.expect(typ("status"))
+        assert st["state"] == "idle" and st["paused"] is False
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
