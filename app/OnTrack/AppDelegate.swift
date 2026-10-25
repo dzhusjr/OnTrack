@@ -23,12 +23,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resumeSessionId: String?  // set while waiting for a restarted engine to resume our session
     private var lastFinalizeSessionId: String?
     private var pendingSummarySessionId: String?
+    private lazy var notesWindow = NotesWindowController(notesDir: settings.notesDir)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: settings.appSupportDir, withIntermediateDirectories: true)
 
         overlay = OverlayController(store: store,
-                                    onOpenNotes: { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) },
+                                    onOpenNotes: { [weak self] in
+                                        self?.notesWindow.show(sessionId: URL(fileURLWithPath: $0).lastPathComponent)
+                                    },
                                     onOpenSettings: { $0 == "mic" ? Permissions.openMicrophoneSettings() : Permissions.openScreenCaptureSettings() },
                                     onSaveTo: { [weak self] in self?.saveTo(notesPath: $0) })
         menu = MenuBarController(actions: .init(
@@ -66,7 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             waitForPower: { [weak self] in self?.settings.waitForPowerToFinalize ?? false },
             queuedCount: { [weak self] in self?.queue.items.count ?? 0 },
             processNow: { [weak self] in self?.processQueue(force: true) },
-            quit: { NSApp.terminate(nil) }
+            quit: { NSApp.terminate(nil) },
+            showNotes: { [weak self] in self?.notesWindow.show() }
         ))
 
         store.onLiveToggled = { [weak self] on in self?.settings.liveByDefault = on }
@@ -180,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .finalizeDone(sid, path):
             if sid == pendingSummarySessionId { pendingSummarySessionId = nil }
             if sid == processingSessionId { queuedSessionFinished(sid) }
+            notesWindow.refresh()
             if !path.isEmpty, let folder = settings.exportFolder {
                 export(notesPath: path, to: folder)
             }

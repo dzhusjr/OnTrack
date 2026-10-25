@@ -23,6 +23,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var queuedCount: () -> Int
         var processNow: () -> Void
         var quit: () -> Void
+        var showNotes: () -> Void
     }
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -102,6 +103,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         add(menu, "Enroll My Voice…", #selector(enroll), enabled: state.engineState == "idle")
         add(menu, "Retry Summary", #selector(retrySummary), enabled: canRetrySummary)
         menu.addItem(.separator())
+        add(menu, "Notes…", #selector(showNotes))
         add(menu, "Open Sessions Folder", #selector(openSessions))
         add(menu, "Open Notes Folder", #selector(openNotes))
         if let name = actions.exportFolderName() {
@@ -135,6 +137,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func retrySummary() { actions.retrySummary() }
     @objc private func openSessions() { actions.openSessions() }
     @objc private func openNotes() { actions.openNotes() }
+    @objc private func showNotes() { actions.showNotes() }
     @objc private func openLogs() { actions.openLogs() }
     @objc private func openConfig() { actions.openConfig() }
     @objc private func toggleAutoShow() { actions.toggleAutoShow() }
