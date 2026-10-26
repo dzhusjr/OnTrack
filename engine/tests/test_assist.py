@@ -205,3 +205,25 @@ def test_runner_passes_the_fast_model(tmp_path, monkeypatch):
     "".join(ClaudeRunner(cfg).stream("x", 10, model="haiku"))
     argv = json.loads((tmp_path / "log.json").read_text())["argv"]
     assert argv[argv.index("--model") + 1] == "haiku"
+
+
+def test_ask_about_a_saved_session_uses_its_notes_folder(dirs):
+    svc, cfg = make_service(dirs, runner_script=[["Friday."]])
+    d = cfg.notes_dir / "2026-10-24-2216-standup"
+    d.mkdir(parents=True)
+    (d / "transcript.md").write_text("`00:01:00` **Them:** Deploy on Friday.\n", encoding="utf-8")
+    (d / "summary.md").write_text("## TL;DR\nDeploy Friday.\n", encoding="utf-8")
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "ask", "id": "notes-1", "question": "when is the deploy?", "session_id": d.name})
+        delta = await c.expect(typ("answer_delta"))
+        assert delta == {"type": "answer_delta", "id": "notes-1", "text": "Friday."}
+        await c.expect(typ("answer_done"))
+        await c.send({"type": "ask", "id": "notes-2", "question": "x", "session_id": "../etc"})
+        await c.expect(lambda m: m["type"] == "error" and m["code"] == "no_session")
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+    assert "Deploy on Friday." in svc.runner.prompts[0] and "Deploy Friday." in svc.runner.prompts[0]
+    assert "when is the deploy?" in (d / "qa.md").read_text(encoding="utf-8")

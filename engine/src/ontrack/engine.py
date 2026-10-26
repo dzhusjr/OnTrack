@@ -260,7 +260,7 @@ class EngineService:
             else:
                 await self._stop_session(notify=True)
         elif t == "ask":
-            self._ask(msg["id"], msg["question"])
+            self._ask(msg["id"], msg["question"], msg.get("session_id"))
         elif t == "finalize":
             self._finalize(msg["session_id"], msg["action"])
         elif t == "retry_summary":
@@ -643,8 +643,18 @@ class EngineService:
             return self.writer.dir
         return self.last_session
 
-    def _ask(self, qid: str, question: str) -> None:
-        session_dir = self._session_dir_for_qa()
+    def _notes_or_session_dir(self, session_id: str) -> Path | None:
+        """A saved session's notes folder (preferred) or its raw session folder."""
+        if not _SAFE_ID.match(session_id) or session_id in (".", ".."):
+            return None
+        for base in (self.cfg.notes_dir, self.cfg.sessions_dir):
+            d = base / session_id
+            if (d / "transcript.md").exists():
+                return d
+        return None
+
+    def _ask(self, qid: str, question: str, session_id: str | None = None) -> None:
+        session_dir = self._notes_or_session_dir(session_id) if session_id else self._session_dir_for_qa()
         if session_dir is None:
             self._send_now(self._error("no_session", "Start a session first."))
             self._send_now({"type": "answer_done", "id": qid})

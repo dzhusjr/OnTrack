@@ -68,3 +68,13 @@ final class ControlMessageTests: XCTestCase {
         XCTAssertEqual(out.map { String(decoding: $0, as: UTF8.self) }, ["{\"a\":1}", "{\"b\":2}"])
     }
 }
+
+final class AskAboutTests: XCTestCase {
+    func testAskAboutSavedSessionEncodesSessionId() throws {
+        let obj = try JSONSerialization.jsonObject(
+            with: Outbound.askAbout(id: "notes-1", question: "when?", sessionId: "2026-10-24-2216-x").encoded()) as! [String: Any]
+        XCTAssertEqual(obj["type"] as? String, "ask")
+        XCTAssertEqual(obj["session_id"] as? String, "2026-10-24-2216-x")
+        XCTAssertEqual(obj["question"] as? String, "when?")
+    }
+}

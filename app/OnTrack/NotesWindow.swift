@@ -13,7 +13,40 @@ final class NotesBrowserModel: ObservableObject {
     @Published var kind: NoteSession.Kind = .summary
     @Published var query = ""
 
+    // asking about a saved session
+    struct Pending: Equatable { let id: String; let sessionId: String; let question: String; var answer: String }
+    @Published var question = ""
+    @Published private(set) var threads: [String: [QAExchange]] = [:]  // per session, this window's questions
+    @Published private(set) var pending: Pending?
+    var ask: ((_ id: String, _ question: String, _ sessionId: String) -> Void)?
+
     init(notesDir: URL) { self.notesDir = notesDir }
+
+    func submit() {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let s = selected, !q.isEmpty, pending == nil, let ask else { return }
+        let id = "notes-" + UUID().uuidString
+        pending = Pending(id: id, sessionId: s.id, question: q, answer: "")
+        question = ""
+        ask(id, q, s.id)
+    }
+
+    /// Engine answers for questions asked here (ids start with "notes-").
+    func receive(_ msg: Inbound) {
+        switch msg {
+        case let .answerDelta(id, text) where id == pending?.id:
+            pending?.answer += text
+        case let .answerDone(id) where id == pending?.id:
+            guard let p = pending else { return }
+            let answer = p.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            threads[p.sessionId, default: []].append(
+                QAExchange(question: p.question, answer: answer.isEmpty ? "_No answer — see menu → Open Logs._" : answer))
+            pending = nil
+            reload()  // qa.md changed: the Q&A tab now has this question too
+        default:
+            break
+        }
+    }
 
     var visible: [NoteSession] { NotesLibrary.filter(sessions, query: query) }
     var selected: NoteSession? { sessions.first { $0.id == selection } }
@@ -48,7 +81,12 @@ final class NotesWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: NotesBrowserModel
 
-    init(notesDir: URL) { model = NotesBrowserModel(notesDir: notesDir) }
+    init(notesDir: URL, ask: @escaping (_ id: String, _ question: String, _ sessionId: String) -> Void) {
+        model = NotesBrowserModel(notesDir: notesDir)
+        model.ask = ask
+    }
+
+    func receive(_ msg: Inbound) { model.receive(msg) }
 
     func show(sessionId: String? = nil) {
         if let id = sessionId { model.select(id) } else { model.reload() }
@@ -185,6 +223,7 @@ private struct NoteDetailView: View {
         let kind = session.kinds.contains(model.kind) ? model.kind : (session.kinds.first ?? .summary)
         let md = model.markdown(session, kind)
         MarkdownWebView(html: NotesPage.html(body: Markdown.html(md), kind: kind), baseURL: session.folder)
+            .safeAreaInset(edge: .bottom, spacing: 0) { NotesAskBar(model: model, session: session) }
             .navigationTitle(session.title)
             .navigationSubtitle(session.date?.formatted(date: .abbreviated, time: .shortened) ?? session.id)
             .toolbar {
@@ -208,6 +247,56 @@ private struct NoteDetailView: View {
                     .help("Show in Finder")
                 }
             }
+    }
+}
+
+/// "Ask about this session" under a saved session: short thread + input (answers via the engine, fast model).
+private struct NotesAskBar: View {
+    @ObservedObject var model: NotesBrowserModel
+    let session: NoteSession
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let thread = Array((model.threads[session.id] ?? []).suffix(3))
+        let pending = model.pending?.sessionId == session.id ? model.pending : nil
+        VStack(alignment: .leading, spacing: 8) {
+            if !thread.isEmpty || pending != nil {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(thread.enumerated()), id: \.offset) { _, ex in
+                            exchange(ex.question, ex.answer, dim: false)
+                        }
+                        if let p = pending {
+                            exchange(p.question, p.answer.isEmpty ? "…" : p.answer, dim: false)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 220)
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle.magnifyingglass").foregroundStyle(.secondary)
+                TextField(thread.isEmpty ? "Ask about this session…" : "Ask a follow-up…", text: $model.question)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .focused($focused)
+                    .onSubmit { model.submit() }
+                    .disabled(model.pending != nil)
+                if model.pending != nil { ProgressView().controlSize(.small) }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private func exchange(_ q: String, _ a: String, dim: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(q).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            Text(LocalizedStringKey(a)).font(.system(size: 13)).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

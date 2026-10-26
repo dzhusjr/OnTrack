@@ -23,7 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resumeSessionId: String?  // set while waiting for a restarted engine to resume our session
     private var lastFinalizeSessionId: String?
     private var pendingSummarySessionId: String?
-    private lazy var notesWindow = NotesWindowController(notesDir: settings.notesDir)
+    private lazy var notesWindow = NotesWindowController(notesDir: settings.notesDir) { [weak self] id, question, sid in
+        self?.client.send(.askAbout(id: id, question: question, sessionId: sid))
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: settings.appSupportDir, withIntermediateDirectories: true)
@@ -205,6 +207,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handle(_ msg: Inbound) {
         supervisor.noteAlive()  // any message proves the engine is alive, not just pongs
         switch msg {
+        case let .answerDelta(id, _) where id.hasPrefix("notes-"), let .answerDone(id) where id.hasPrefix("notes-"):
+            notesWindow.receive(msg)
+            return  // a question from the Notes window, not the overlay
         case .pong:
             supervisor.noteAlive()
         case let .status(st):

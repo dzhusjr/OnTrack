@@ -11,7 +11,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "ping": (),
     "start_session": ("name",),
     "stop_session": (),
-    "ask": ("id", "question"),
+    "ask": ("id", "question"),  # optional session_id: ask about a saved session (Notes window)
     "finalize": ("session_id", "action"),
     "retry_summary": ("session_id",),
     "enroll_start": (),

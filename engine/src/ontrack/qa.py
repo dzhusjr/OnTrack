@@ -69,7 +69,8 @@ class QaService:
         now = now or datetime.now()
         me = self.cfg.my_names[0] if self.cfg.my_names else "Roman"
         with self._lock:
-            prompt = build_qa_prompt(_read(session_dir / "transcript.md"), _read(session_dir / "notes.md"), question,
+            notes = "\n\n".join(t for t in (_read(session_dir / "summary.md"), _read(session_dir / "notes.md")) if t.strip())
+            prompt = build_qa_prompt(_read(session_dir / "transcript.md"), notes, question,
                                      me=me, project=Path(project_dir).name if project_dir else None,
                                      history=recent_exchanges(_read(session_dir / "qa.md")))
             parts: list[str] = []

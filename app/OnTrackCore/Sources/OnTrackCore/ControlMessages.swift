@@ -180,6 +180,7 @@ public enum Outbound: Equatable, Sendable {
     case setPaused(Bool)
     case setSessionOptions(SessionOptions)
     case suggest(id: String)
+    case askAbout(id: String, question: String, sessionId: String)  // a saved session (Notes window)
 
     public static let typeNames: Set<String> = [
         "ping", "start_session", "stop_session", "ask", "finalize", "retry_summary", "enroll_start", "set_config",
@@ -202,6 +203,7 @@ public enum Outbound: Equatable, Sendable {
             return ["type": "set_session_options", "project_dir": o.projectDir ?? NSNull(), "languages": o.languages,
                     "assist": o.assist, "interview": o.interview, "names": o.names]
         case let .suggest(id): return ["type": "suggest", "id": id]
+        case let .askAbout(id, q, sid): return ["type": "ask", "id": id, "question": q, "session_id": sid]
         }
     }
 
