@@ -17,7 +17,7 @@ final class ControlMessageTests: XCTestCase {
             if case .unknown = msg { XCTFail("unknown: \(type)") }
             decoded += 1
         }
-        XCTAssertEqual(decoded, 11)
+        XCTAssertEqual(decoded, 14)
     }
 
     func testOutboundEncodingMatchesGolden() throws {
@@ -32,6 +32,9 @@ final class ControlMessageTests: XCTestCase {
             "set_config": .setConfig(["tau": 0.6]),
             "set_live": .setLive(false),
             "set_paused": .setPaused(true),
+            "set_session_options": .setSessionOptions(SessionOptions(projectDir: "/Users/dzhus/PycharmProjects/cetl",
+                                                                     languages: ["uk"], assist: true, interview: false)),
+            "suggest": .suggest(id: "s1"),
         ]
         var seen = 0
         for line in try goldenLines() {

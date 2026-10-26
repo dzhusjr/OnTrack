@@ -20,6 +20,7 @@ struct OverlayView: View {
                 EmptyView()
             case .collapsed, .expanded:
                 liveSection
+                if let sug = s.suggestion { suggestionCard(sug) }
                 if s.mode == .expanded { askSection }
             case .endCard:
                 endCard
@@ -56,10 +57,16 @@ struct OverlayView: View {
                 }
                 let shown = s.visibleLines
                 ForEach(Array(shown.enumerated()), id: \.element.seq) { index, line in
+                    let addressed = s.addressedSeqs.contains(line.seq)
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Circle().fill(Self.color(for: line.speaker)).frame(width: 7, height: 7)
+                        if addressed {
+                            Image(systemName: "person.wave.2.fill").font(.system(size: 9)).foregroundStyle(.yellow)
+                                .help("You were addressed")
+                        } else {
+                            Circle().fill(Self.color(for: line.speaker)).frame(width: 7, height: 7)
+                        }
                         Text(line.text)
-                            .font(.system(size: 13))
+                            .font(.system(size: 13, weight: addressed ? .semibold : .regular))
                             .foregroundStyle(line.speaker == "Note" ? Color.secondary : Color.primary)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -131,6 +138,30 @@ struct OverlayView: View {
                 Text("reconnecting…").font(.system(size: 10)).foregroundStyle(.orange)
             }
         }
+    }
+
+    // MARK: suggested reply
+
+    private func suggestionCard(_ sug: Suggestion) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "lightbulb.fill").font(.system(size: 11)).foregroundStyle(.yellow)
+                .padding(.top, 2)
+            if sug.text.isEmpty {
+                Text("Drafting a reply…").font(.system(size: 13)).foregroundStyle(.secondary)
+            } else {
+                Text(sug.text)
+                    .font(.system(size: 13, weight: .medium))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Button { store.send(.dismissSuggestion) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Dismiss — ⌥⇧A drafts a reply to the latest question")
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.yellow.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.yellow.opacity(0.35), lineWidth: 1))
     }
 
     // MARK: Q&A

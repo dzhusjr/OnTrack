@@ -23,6 +23,7 @@ from .control import NdjsonDecoder, ProtocolError, encode, validate
 from .finalize import FinalizeDeps, finalize, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
+from .assist import address_reason, build_suggest_prompt, name_regex, transcript_tail
 from .qa import QaService
 from .recorder import AudioRecorder, recorded_seconds
 from .session import SessionWriter, paused_ranges, read_lines
@@ -78,6 +79,12 @@ class EngineService:
         # full large-v3 for the saved transcript (more accurate than the live turbo model)
         self.final_asr = LockedAsr(final_asr) if final_asr is not None else self.backends.asr
         self.qa = QaService(runner, cfg)
+        self.runner = runner
+        # per-session choices from the app (menu): project folder for Claude, language lock, reply helper
+        self.opts: dict = {"project_dir": None, "languages": None, "assist": True, "interview": False}
+        self._names = name_regex(cfg.my_names)
+        self._suggest_lock = threading.Lock()
+        self._last_auto_suggest = -1e9
         self.state = "idle"
         self.degraded = False
         self.writer: SessionWriter | None = None
@@ -268,6 +275,10 @@ class EngineService:
             self._set_live(bool(msg["enabled"]))
         elif t == "set_paused":
             self._set_paused(bool(msg["paused"]))
+        elif t == "set_session_options":
+            self._set_options(msg)
+        elif t == "suggest":
+            self._suggest(str(msg["id"]), trigger=None, delay=0.0, auto=False)
         elif t == "set_config":
             try:
                 self.cfg = apply_overrides(self.cfg, msg["config"])
@@ -449,9 +460,10 @@ class EngineService:
         origin = self.writer.origin_ns
         if self.pipeline is None:
             self.pipeline = Pipeline(self.cfg, self.backends, self.writer, self._voiceprint,
-                                     on_line=lambda line: self.send(self._line_msg(line)),
+                                     on_line=self._on_line,
                                      fallback_asr=self.fallback_asr,
                                      on_partial=self._partial)
+            self.pipeline.transcriber.languages = self.opts["languages"]
         if self.recorder is None:
             self.recorder = AudioRecorder(self._audio_dir(self.writer.id), origin)
         t_now = (f.t_ns - origin) / 1e9
@@ -544,6 +556,86 @@ class EngineService:
             self._call(self._send_status)
 
     # ---- background jobs ---------------------------------------------------------------------------
+    # ---- session options & reply helper --------------------------------------------------------------
+    def _set_options(self, msg: dict) -> None:
+        if "project_dir" in msg:
+            raw = msg.get("project_dir")
+            p = Path(str(raw)).expanduser() if raw else None
+            if p is not None and not p.is_dir():
+                self._send_now(self._error("bad_project", f"Project folder not found: {p}"))
+                p = None
+            self.opts["project_dir"] = p
+        if "languages" in msg:
+            langs = tuple(l for l in (msg.get("languages") or ()) if isinstance(l, str) and l)
+            self.opts["languages"] = langs or None
+            if self.pipeline is not None:
+                self.pipeline.transcriber.languages = self.opts["languages"]
+        for key in ("assist", "interview"):
+            if key in msg:
+                self.opts[key] = bool(msg[key])
+        log.info("session options: project=%s languages=%s assist=%s interview=%s", self.opts["project_dir"],
+                 self.opts["languages"], self.opts["assist"], self.opts["interview"])
+
+    def _on_line(self, line: Line) -> None:
+        """Pipeline thread: forward the line; notice when someone addresses you."""
+        self.send(self._line_msg(line))
+        reason = address_reason(line, self._names, self.opts["interview"])
+        if reason is None:
+            return
+        self.send({"type": "addressed", "session_id": self.writer.id if self.writer else None, "seq": line.seq,
+                   "reason": reason, "text": line.text})
+        if not self.opts["assist"]:
+            return
+        now = time.monotonic()
+        if reason == "question" and now - self._last_auto_suggest < self.cfg.suggest_min_gap_s:
+            return
+        if self._suggest_lock.locked():
+            return  # one suggestion at a time; the newest context is picked up by the running one
+        self._last_auto_suggest = now
+        self._suggest(f"auto-{line.seq}", trigger=line.text, delay=self.cfg.suggest_delay_s, auto=True)
+
+    def _suggest(self, sid: str, trigger: str | None, delay: float, auto: bool) -> None:
+        session_dir = self._session_dir_for_qa()
+        if session_dir is None:
+            self.send(self._error("no_session", "Start a session first."))
+            self.send({"type": "suggestion_done", "id": sid})
+            return
+        project = self.opts["project_dir"]
+        me = self.cfg.my_names[0] if self.cfg.my_names else "Roman"
+
+        def job() -> None:
+            if not self._suggest_lock.acquire(blocking=not auto):
+                self.send({"type": "suggestion_done", "id": sid})
+                return
+            try:
+                if delay > 0:
+                    time.sleep(delay)  # let the speaker finish the question
+                said = trigger
+                if said is None:
+                    others = [l for l in read_lines(session_dir) if l.speaker not in (Speaker.ME, Speaker.NOTE)]
+                    said = others[-1].text if others else "(nothing yet)"
+                prompt = build_suggest_prompt(transcript_tail(session_dir, self.cfg.suggest_context_lines), said, me,
+                                              project.name if project else None)
+                parts: list[str] = []
+                kwargs = {"project_dir": project} if project else {}
+                for chunk in self.runner.stream(prompt, self.cfg.qa_timeout_s, **kwargs):
+                    parts.append(chunk)
+                    self.send({"type": "suggestion_delta", "id": sid, "text": chunk})
+                reply = "".join(parts).strip()
+                if reply and reply != "—":
+                    with open(session_dir / "qa.md", "a", encoding="utf-8") as f:
+                        f.write(f"## Suggested reply ({datetime.now():%H:%M}) to: {said.strip()}\n\n{reply}\n\n")
+            except LlmError as e:
+                self.send(self._error(e.code, e.message))
+            except Exception as e:
+                log.exception("suggestion failed")
+                self.send(self._error("llm_failed", str(e)))
+            finally:
+                self._suggest_lock.release()
+                self.send({"type": "suggestion_done", "id": sid})
+
+        self._pool.submit(job)
+
     def _session_dir_for_qa(self) -> Path | None:
         if self.writer is not None and self.state in ("recording", "stopping"):
             return self.writer.dir
@@ -558,7 +650,7 @@ class EngineService:
 
         def job() -> None:
             try:
-                for chunk in self.qa.ask(session_dir, question):
+                for chunk in self.qa.ask(session_dir, question, project_dir=self.opts["project_dir"]):
                     self.send({"type": "answer_delta", "id": qid, "text": chunk})
             except LlmError as e:
                 self.send(self._error(e.code, e.message))

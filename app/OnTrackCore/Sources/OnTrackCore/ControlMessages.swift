@@ -64,6 +64,9 @@ public enum Inbound: Equatable, Sendable {
     case finalizeProgress(sessionId: String, stage: String, pct: Double)
     case finalizeDone(sessionId: String, notesPath: String)
     case enrollDone(score: Double)
+    case addressed(sessionId: String, seq: Int, reason: String, text: String)  // someone said your name / asked you
+    case suggestionDelta(id: String, text: String)
+    case suggestionDone(id: String)
     case error(EngineError)
     case unknown(String)
 
@@ -89,6 +92,7 @@ public enum Inbound: Equatable, Sendable {
         let notes_path: String?
         let channel: Int?
         let score: Double?
+        let reason: String?
         let code: String?
         let message: String?
         let recoverable: Bool?
@@ -125,6 +129,11 @@ public enum Inbound: Equatable, Sendable {
             return .finalizeProgress(sessionId: try need(r.session_id), stage: try need(r.stage), pct: r.pct ?? 0)
         case "finalize_done": return .finalizeDone(sessionId: try need(r.session_id), notesPath: r.notes_path ?? "")
         case "enroll_done": return .enrollDone(score: try need(r.score))
+        case "addressed":
+            return .addressed(sessionId: r.session_id ?? "", seq: try need(r.seq), reason: try need(r.reason),
+                              text: try need(r.text))
+        case "suggestion_delta": return .suggestionDelta(id: try need(r.id), text: try need(r.text))
+        case "suggestion_done": return .suggestionDone(id: try need(r.id))
         case "error":
             return .error(EngineError(code: try need(r.code), message: r.message ?? "", recoverable: r.recoverable ?? true))
         default: return .unknown(r.type)
@@ -133,6 +142,21 @@ public enum Inbound: Equatable, Sendable {
 }
 
 // MARK: - App → engine
+
+/// Per-session choices sent to the engine (menu): project folder for Claude, language lock, reply helper.
+public struct SessionOptions: Equatable, Sendable {
+    public var projectDir: String?
+    public var languages: [String]  // empty = automatic
+    public var assist: Bool  // draft a reply when someone says your name
+    public var interview: Bool  // … and for every question someone asks
+
+    public init(projectDir: String? = nil, languages: [String] = [], assist: Bool = true, interview: Bool = false) {
+        self.projectDir = projectDir
+        self.languages = languages
+        self.assist = assist
+        self.interview = interview
+    }
+}
 
 public enum FinalizeAction: String, Equatable, Sendable {
     case saveAll = "save_all"
@@ -151,10 +175,12 @@ public enum Outbound: Equatable, Sendable {
     case setConfig([String: Double])
     case setLive(Bool)
     case setPaused(Bool)
+    case setSessionOptions(SessionOptions)
+    case suggest(id: String)
 
     public static let typeNames: Set<String> = [
         "ping", "start_session", "stop_session", "ask", "finalize", "retry_summary", "enroll_start", "set_config",
-        "set_live", "set_paused",
+        "set_live", "set_paused", "set_session_options", "suggest",
     ]
 
     public var jsonObject: [String: Any] {
@@ -169,6 +195,10 @@ public enum Outbound: Equatable, Sendable {
         case let .setConfig(cfg): return ["type": "set_config", "config": cfg]
         case let .setLive(on): return ["type": "set_live", "enabled": on]
         case let .setPaused(on): return ["type": "set_paused", "paused": on]
+        case let .setSessionOptions(o):
+            return ["type": "set_session_options", "project_dir": o.projectDir ?? NSNull(), "languages": o.languages,
+                    "assist": o.assist, "interview": o.interview]
+        case let .suggest(id): return ["type": "suggest", "id": id]
         }
     }
 

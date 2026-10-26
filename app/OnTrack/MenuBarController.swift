@@ -23,7 +23,27 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var queuedCount: () -> Int
         var processNow: () -> Void
         var quit: () -> Void
+        var session: SessionMenu
     }
+
+    /// Project folder, language lock and reply helper for the next / current session.
+    struct SessionMenu {
+        var project: () -> String?
+        var recentProjects: () -> [String]
+        var setProject: (String?) -> Void
+        var chooseProject: () -> Void
+        var language: () -> String
+        var setLanguage: (String) -> Void
+        var assist: () -> Bool
+        var toggleAssist: () -> Void
+        var interview: () -> Bool
+        var toggleInterview: () -> Void
+        var suggestNow: () -> Void
+    }
+
+    static let languages: [(code: String, title: String)] = [
+        ("auto", "Automatic"), ("uk", "Українська"), ("en", "English"), ("nl", "Nederlands"),
+    ]
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let actions: Actions
@@ -94,6 +114,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(waiting)
             add(menu, "Process Now", #selector(processNow))
         }
+        addSessionItems(menu)
         let auto = NSMenuItem(title: "Show Live Bar When Recording", action: #selector(toggleAutoShow), keyEquivalent: "")
         auto.target = self
         auto.state = actions.autoShow() ? .on : .off
@@ -119,6 +140,70 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(status)
         add(menu, "Quit OnTrack", #selector(quit), key: "q")
     }
+
+    private func addSessionItems(_ menu: NSMenu) {
+        menu.addItem(.separator())
+        let s = actions.session
+        let current = s.project()
+        let projectItem = NSMenuItem(title: "Project: \(current.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "None")",
+                                     action: nil, keyEquivalent: "")
+        let projects = NSMenu()
+        let none = NSMenuItem(title: "None", action: #selector(pickProject(_:)), keyEquivalent: "")
+        none.target = self
+        none.state = current == nil ? .on : .off
+        projects.addItem(none)
+        for path in s.recentProjects() {
+            let mi = NSMenuItem(title: URL(fileURLWithPath: path).lastPathComponent, action: #selector(pickProject(_:)),
+                                keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = path
+            mi.toolTip = path
+            mi.state = path == current ? .on : .off
+            projects.addItem(mi)
+        }
+        projects.addItem(.separator())
+        let choose = NSMenuItem(title: "Choose Folder…", action: #selector(chooseProject), keyEquivalent: "")
+        choose.target = self
+        projects.addItem(choose)
+        projectItem.submenu = projects
+        projectItem.toolTip = "Claude answers questions and suggests replies with this folder (and its CLAUDE.md) as context"
+        menu.addItem(projectItem)
+
+        let lang = s.language()
+        let langItem = NSMenuItem(title: "Language: \(Self.languages.first { $0.code == lang }?.title ?? lang)",
+                                  action: nil, keyEquivalent: "")
+        let langs = NSMenu()
+        for (code, title) in Self.languages {
+            let mi = NSMenuItem(title: title, action: #selector(pickLanguage(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = code
+            mi.state = code == lang ? .on : .off
+            langs.addItem(mi)
+        }
+        langItem.submenu = langs
+        langItem.toolTip = "Lock transcription to one language when the whole conversation is in it (most accurate)"
+        menu.addItem(langItem)
+
+        let assist = NSMenuItem(title: "Suggest a Reply When Someone Says My Name", action: #selector(toggleAssist),
+                                keyEquivalent: "")
+        assist.target = self
+        assist.state = s.assist() ? .on : .off
+        menu.addItem(assist)
+        let interview = NSMenuItem(title: "Interview Mode — Suggest for Every Question", action: #selector(toggleInterview),
+                                   keyEquivalent: "")
+        interview.target = self
+        interview.state = s.interview() ? .on : .off
+        menu.addItem(interview)
+        add(menu, "Suggest a Reply Now", #selector(suggestNow), key: "a", mods: [.option, .shift], enabled: state.recording)
+        menu.addItem(.separator())
+    }
+
+    @objc private func pickProject(_ sender: NSMenuItem) { actions.session.setProject(sender.representedObject as? String) }
+    @objc private func chooseProject() { actions.session.chooseProject() }
+    @objc private func pickLanguage(_ sender: NSMenuItem) { actions.session.setLanguage(sender.representedObject as? String ?? "auto") }
+    @objc private func toggleAssist() { actions.session.toggleAssist() }
+    @objc private func toggleInterview() { actions.session.toggleInterview() }
+    @objc private func suggestNow() { actions.session.suggestNow() }
 
     private func add(_ menu: NSMenu, _ title: String, _ sel: Selector, key: String = "",
                      mods: NSEvent.ModifierFlags = [.command], enabled: Bool = true) {

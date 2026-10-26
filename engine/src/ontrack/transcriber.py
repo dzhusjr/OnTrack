@@ -17,6 +17,7 @@ class AsrBackend(Protocol):
     def run(self, samples: np.ndarray, language: str, initial_prompt: str | None) -> Transcript: ...
 
 
+SHORT_KEEP_S = 1.5  # shorter utterances keep the channel's current language
 CONFIDENT = 0.8  # language-ID probability above which we decode once
 # Whisper's language ID is confidently wrong toward Russian on Ukrainian speech, so a Russian pick is always
 # checked against Ukrainian; a short native anchor prompt keeps Ukrainian spelling from drifting.
@@ -38,6 +39,11 @@ class Transcriber:
         self.cfg = cfg
         self._context: dict[Channel, deque[tuple[str | None, str]]] = {}
         self._last_lang: dict[Channel, str] = {}
+        self.languages: tuple[str, ...] | None = None  # per-session lock (menu → Language); None = auto
+
+    @property
+    def allowed(self) -> list[str]:
+        return list(self.languages or self.cfg.allowed_langs)
 
     def _ctx(self, channel: Channel) -> deque[tuple[str | None, str]]:
         return self._context.setdefault(channel, deque(maxlen=8))
@@ -65,26 +71,40 @@ class Transcriber:
         return t
 
     def transcribe(self, u: Utterance) -> Transcript:
-        probs = self.backend.detect_language(u.samples)
-        allowed = list(self.cfg.allowed_langs)
-        ranked = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))
-        candidates = ranked[:1] if probs.get(ranked[0], 0.0) >= CONFIDENT or len(ranked) < 2 else ranked[:2]
-        if "ru" in candidates and "uk" in allowed and "uk" not in candidates:
-            candidates.append("uk")
+        allowed = self.allowed
+        last = self._last_lang.get(u.channel)
+        if last not in allowed:
+            last = None
+        if len(allowed) == 1:
+            candidates = allowed  # language locked for this session: no detection, no translation risk
+        elif last is not None and u.duration < SHORT_KEEP_S:
+            candidates = [last]  # language ID on a second of audio is a coin flip: stay in the conversation's language
+        else:
+            probs = self.backend.detect_language(u.samples)
+            ranked = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))
+            candidates = ranked[:1] if probs.get(ranked[0], 0.0) >= CONFIDENT or len(ranked) < 2 else ranked[:2]
+            if "ru" in candidates and "uk" in allowed and "uk" not in candidates:
+                candidates.append("uk")
+            if last is not None and last not in candidates:
+                candidates.append(last)  # always try the language the channel was just speaking
         results = [(l, self._run(u.samples, l, self._prompt(u.channel, l, u.duration))) for l in candidates]
         results = [(l, t) for l, t in results if t.text.strip()] or results
         best_lp = max(t.avg_logprob for _, t in results)
         close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - self.cfg.lang_tie_margin]
-        lang, best = min(close, key=lambda lt: allowed.index(lt[0]))
+        # ties go to the language already being spoken: a Ukrainian phrase decoded "in English" is a fluent
+        # translation and often scores as well as the real transcript
+        lang, best = min(close, key=lambda lt: (lt[0] != last, allowed.index(lt[0])))
         self._last_lang[u.channel] = lang
         return best
 
     def preview(self, u: Utterance) -> Transcript:
         """Cheap single decode of an unfinished phrase, in the channel's current language."""
+        allowed = self.allowed
         lang = self._last_lang.get(u.channel)
+        if lang not in allowed:
+            lang = allowed[0] if len(allowed) == 1 else None
         if lang is None:
             probs = self.backend.detect_language(u.samples)
-            allowed = list(self.cfg.allowed_langs)
             lang = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))[0]
         return self._run(u.samples, lang, self._prompt(u.channel, lang, u.duration))
 

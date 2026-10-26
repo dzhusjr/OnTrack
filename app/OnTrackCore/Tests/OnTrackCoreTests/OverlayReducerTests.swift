@@ -343,3 +343,51 @@ final class LiveToggleTests: XCTestCase {
         XCTAssertFalse(s.liveTranscription)
     }
 }
+
+final class SuggestionReducerTests: XCTestCase {
+    private func recording(_ s: inout OverlayState) {
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+    }
+
+    func testAddressedMarksLineAndShowsHiddenBar() {
+        var s = OverlayState()
+        recording(&s)
+        reduce(&s, .hide)
+        XCTAssertEqual(s.mode, .hidden)
+        reduce(&s, .engine(.addressed(sessionId: "s1", seq: 4, reason: "name", text: "Роман, скажи")))
+        XCTAssertEqual(s.addressedSeqs, [4])
+        XCTAssertEqual(s.mode, .collapsed)
+        reduce(&s, .engine(.addressed(sessionId: "old", seq: 9, reason: "name", text: "x")))
+        XCTAssertEqual(s.addressedSeqs, [4])
+    }
+
+    func testSuggestionStreamsAndEmptyOneDisappears() {
+        var s = OverlayState()
+        recording(&s)
+        reduce(&s, .engine(.suggestionDelta(id: "auto-4", text: "У п'ятницю ")))
+        reduce(&s, .engine(.suggestionDelta(id: "auto-4", text: "буде готово.")))
+        reduce(&s, .engine(.suggestionDone(id: "auto-4")))
+        XCTAssertEqual(s.suggestion, Suggestion(id: "auto-4", text: "У п'ятницю буде готово.", done: true))
+        reduce(&s, .engine(.suggestionDelta(id: "auto-9", text: "—")))
+        reduce(&s, .engine(.suggestionDone(id: "auto-9")))
+        XCTAssertNil(s.suggestion)
+    }
+
+    func testManualRequestSendsSuggestAndCanBeDismissed() {
+        var s = OverlayState()
+        XCTAssertEqual(reduce(&s, .requestSuggestion(id: "m1")), [])  // nothing to answer yet
+        recording(&s)
+        XCTAssertEqual(reduce(&s, .requestSuggestion(id: "m1")), [.suggest(id: "m1")])
+        XCTAssertEqual(s.suggestion, Suggestion(id: "m1"))
+        reduce(&s, .dismissSuggestion)
+        XCTAssertNil(s.suggestion)
+    }
+
+    func testSessionOptionsEncoding() throws {
+        let o = Outbound.setSessionOptions(SessionOptions(projectDir: nil, languages: [], assist: true, interview: true))
+        let obj = try JSONSerialization.jsonObject(with: o.encoded()) as! [String: Any]
+        XCTAssertTrue(obj["project_dir"] is NSNull)
+        XCTAssertEqual(obj["languages"] as? [String], [])
+        XCTAssertEqual(obj["interview"] as? Bool, true)
+    }
+}

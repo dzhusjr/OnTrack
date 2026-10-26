@@ -126,7 +126,11 @@ If you change a model in the engine config, run `scripts/dev.sh models` once to 
 | Pause / resume recording | ⌥⇧P. Nothing is recorded or transcribed while paused; the transcript gets a `[recording paused mm:ss]` note |
 | Live transcription on/off | ⌥⇧L, the bubble icon on the bar, or menu → Live Transcription. Off = record only; transcribed when you save |
 | Save battery | menu → Transcribe After Recording Only When Plugged In: on battery, Save keeps the audio and the heavy work (speaker separation, large-v3, summary) runs once you plug in |
-| Ask about the session | ⌥Space → type → Enter (Esc to collapse) |
+| Ask about the session | ⌥Space → type → Enter (Esc to collapse). Answers are kept to a few lines |
+| Someone says your name | the line gets a 👋 marker, the bar pops up, and a 1–2 line suggested reply appears (menu → Suggest a Reply When Someone Says My Name). Names are `my_names` in the engine config |
+| Interview / meeting helper | menu → Interview Mode: a short suggested reply for every question someone asks you. ⌥⇧A drafts one for the latest question anytime |
+| Work inside a project | menu → Project → Choose Folder… (e.g. your CETL repo). Questions and suggested replies then use that folder (read-only) and its CLAUDE.md as context |
+| Whole conversation in one language | menu → Language → Українська / English / Nederlands. Most accurate; stops short phrases being "translated" into English |
 | End of session | overlay card: **Save summary + transcript** (Enter) · Transcript only · Discard (click twice) |
 
 Files: live sessions in `sessions/`, saved notes in `notes/<session>/` (summary.md, transcript.md, qa.md, notes.md). Menu → Also Save Notes To… copies every saved session into a folder of your choice (e.g. iCloud Drive).
@@ -141,6 +145,8 @@ Engine settings: menu → Edit Engine Config… (`~/Library/Application Support/
 - **`zsh: command not found: #`** — you pasted a line with a `#` comment; paste the command without it.
 - **Xcode / "XCTest not found"** — not needed; the build uses the Command Line Tools. Swift unit tests are skipped without full Xcode, that's fine.
 - **macOS asks for Microphone / Screen Recording again after every rebuild** — run `scripts/dev.sh cert` once, then `scripts/dev.sh app`. If it's still stuck: `scripts/dev.sh reset-permissions`, reopen the app and grant again.
+- **Call audio shows up twice (as `Them` and `Other`) or the live text is odd on calls** — that's the call coming out of the speakers into the mic. OnTrack now drops mic speech that overlaps call audio (unless it's your own voice), but headphones still give the cleanest result. Voice Isolation doesn't help here (and would mute people in the room).
+- **Ukrainian/Dutch lines come out in English** — set menu → Language to the conversation's language.
 - **Nothing is transcribed, files are empty** — the mic delivers silence: check System Settings → Sound → Input, and that OnTrack is allowed under Privacy & Security → Microphone.
 - **"No voiceprint yet"** — menu → Enroll My Voice… (talk for 30 s in a normal voice).
 - **"Claude Code CLI not found" / summaries fail** — install and log in (step 1), then menu → Retry Summary. Transcripts are saved either way.

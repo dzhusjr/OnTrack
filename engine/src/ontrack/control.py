@@ -18,6 +18,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "set_config": ("config",),
     "set_live": ("enabled",),  # live transcription on/off; audio keeps recording either way
     "set_paused": ("paused",),  # pause/resume recording; nothing is captured while paused
+    "set_session_options": (),  # any of: project_dir, languages, assist, interview
+    "suggest": ("id",),  # draft a reply to the latest thing someone said
     # engine -> app
     "pong": ("state",),
     "status": ("state", "model_ready", "session_id", "degraded"),
@@ -25,6 +27,9 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "partial": ("session_id", "channel", "t_start", "text"),  # live preview of the phrase being spoken; "" clears
     "answer_delta": ("id", "text"),
     "answer_done": ("id",),
+    "addressed": ("session_id", "seq", "reason", "text"),  # someone said your name / asked you (interview mode)
+    "suggestion_delta": ("id", "text"),
+    "suggestion_done": ("id",),
     "session_stopped": ("session_id", "duration_s", "line_count"),
     "finalize_progress": ("session_id", "stage", "pct"),
     "finalize_done": ("session_id", "notes_path"),

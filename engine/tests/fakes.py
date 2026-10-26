@@ -55,10 +55,14 @@ class FakeAsr:
 
     def detect_language(self, samples):
         self._current = self.script.pop(0)
+        self._for = id(samples)
         return self._current[0]
 
     def run(self, samples, language, initial_prompt):
         self.calls.append((language, initial_prompt))
+        if getattr(self, "_for", None) != id(samples):  # utterance decoded without language detection
+            self._current = self.script.pop(0)
+            self._for = id(samples)
         return self._current[1]
 
 
@@ -100,8 +104,9 @@ class FakeRunner:
         self.script = list(script)
         self.prompts: list[str] = []
 
-    def stream(self, prompt, timeout_s):
+    def stream(self, prompt, timeout_s, project_dir=None):
         self.prompts.append(prompt)
+        self.project_dirs = getattr(self, "project_dirs", []) + [project_dir]
         item = self.script.pop(0)
         if isinstance(item, Exception):
             raise item

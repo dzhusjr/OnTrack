@@ -66,7 +66,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             waitForPower: { [weak self] in self?.settings.waitForPowerToFinalize ?? false },
             queuedCount: { [weak self] in self?.queue.items.count ?? 0 },
             processNow: { [weak self] in self?.processQueue(force: true) },
-            quit: { NSApp.terminate(nil) }
+            quit: { NSApp.terminate(nil) },
+            session: .init(
+                project: { [weak self] in self?.settings.projectDir },
+                recentProjects: { [weak self] in self?.settings.recentProjects ?? [] },
+                setProject: { [weak self] path in self?.setProject(path) },
+                chooseProject: { [weak self] in
+                    guard let self, let folder = Self.pickFolder(
+                        title: "Folder Claude should use as context (e.g. a code project)",
+                        start: self.settings.projectDir.map { URL(fileURLWithPath: $0) }, prompt: "Use Folder")
+                    else { return }
+                    self.setProject(folder.path)
+                },
+                language: { [weak self] in self?.settings.sessionLanguage ?? "auto" },
+                setLanguage: { [weak self] code in
+                    guard let self else { return }
+                    self.settings.sessionLanguage = code
+                    self.sendSessionOptions()
+                    self.store.showToast(code == "auto" ? "Language: automatic"
+                                         : "Transcribing only in \(MenuBarController.languages.first { $0.code == code }?.title ?? code)")
+                },
+                assist: { [weak self] in self?.settings.suggestReplies ?? true },
+                toggleAssist: { [weak self] in
+                    guard let self else { return }
+                    self.settings.suggestReplies.toggle()
+                    self.sendSessionOptions()
+                },
+                interview: { [weak self] in self?.settings.interviewMode ?? false },
+                toggleInterview: { [weak self] in
+                    guard let self else { return }
+                    self.settings.interviewMode.toggle()
+                    if self.settings.interviewMode { self.settings.suggestReplies = true }
+                    self.sendSessionOptions()
+                    self.store.showToast(self.settings.interviewMode ? "Interview mode: replies suggested for every question"
+                                                                     : "Interview mode off")
+                },
+                suggestNow: { [weak self] in self?.suggestNow() }
+            )
         ))
 
         store.onLiveToggled = { [weak self] on in self?.settings.liveByDefault = on }
@@ -123,6 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeys.register(id: 4, keyCode: HotkeyService.optionShiftP.keyCode, modifiers: HotkeyService.optionShiftP.modifiers) {
             [weak self] in self?.togglePause()
+        }
+        hotkeys.register(id: 5, keyCode: HotkeyService.optionShiftA.keyCode, modifiers: HotkeyService.optionShiftA.modifiers) {
+            [weak self] in self?.suggestNow()
         }
 
         supervisor.onFatal = { [weak self] text in self?.store.showIssue(text) }
@@ -225,6 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func connectionChanged(_ up: Bool) {
         if up {
+            sendSessionOptions()  // a (re)started engine starts with defaults
             processingSessionId = nil  // a restarted engine forgot it: try again
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.processQueue(force: false) }
             // Engine restarted mid-session → resume the same session (spec §8). Audio stays buffered until confirmed.
@@ -240,6 +280,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: actions
+
+    private func sendSessionOptions() {
+        guard client.isConnected else { return }
+        client.send(.setSessionOptions(settings.sessionOptions))
+    }
+
+    private func setProject(_ path: String?) {
+        settings.projectDir = path
+        sendSessionOptions()
+        store.showToast(path.map { "Claude now answers with “\(URL(fileURLWithPath: $0).lastPathComponent)” as context" }
+                        ?? "No project folder")
+    }
+
+    private func suggestNow() {
+        guard store.state.recording else { return }
+        store.send(.requestSuggestion(id: UUID().uuidString))
+    }
 
     private func togglePause() {
         guard store.state.recording else { return }
@@ -321,10 +378,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private static func pickFolder(title: String, start: URL?) -> URL? {
+    private static func pickFolder(title: String, start: URL?, prompt: String = "Save Here") -> URL? {
         let panel = NSOpenPanel()
         panel.title = title
-        panel.prompt = "Save Here"
+        panel.prompt = prompt
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true

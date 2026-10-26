@@ -14,7 +14,7 @@ from .segmenter import Segmenter
 from .session import SessionWriter
 from .speaker import Embedder, SpeakerLabeler
 from .transcriber import AsrBackend, Transcriber
-from .types import AudioFrame, Channel, Line, Utterance
+from .types import AudioFrame, Channel, Line, Speaker, Utterance
 from .vad import Vad
 
 
@@ -91,6 +91,8 @@ class Pipeline:
         self._preview_at: dict[Channel, tuple[float, float]] = {}  # channel -> (utterance start, position)
         self._origin: int | None = writer.origin_ns  # resumed sessions keep their time origin
         self._segmenters: dict[Channel, Segmenter] = {}
+        self._sys_spans: list[tuple[float, float]] = []  # recent call-audio speech, for echo detection
+        self.echo_dropped = 0
 
     def process(self, frame: AudioFrame) -> None:
         if self._origin is None:
@@ -169,10 +171,25 @@ class Pipeline:
                 keep.append(u)
         self._held = keep
 
+    def _overlaps_call(self, u: Utterance) -> float:
+        """Fraction of this mic utterance that coincides with speech on the call channel."""
+        if u.duration <= 0:
+            return 0.0
+        covered = sum(max(0.0, min(u.t_end, b) - max(u.t_start, a)) for a, b in self._sys_spans)
+        return min(1.0, covered / u.duration)
+
     def _handle(self, u: Utterance) -> None:
         if self.on_partial is not None and self.cfg.live_preview:
             self.on_partial(u.channel, u.t_start, "")  # the final line (or nothing) replaces the preview
         t0 = time.perf_counter()
+        if u.channel == Channel.SYSTEM:
+            self._sys_spans = [s for s in self._sys_spans if u.t_start - s[1] < 60.0] + [(u.t_start, u.t_end)]
+            speaker = Speaker.THEM
+        else:
+            speaker = self.labeler.label(u)
+            if speaker != Speaker.ME and self._overlaps_call(u) >= self.cfg.echo_overlap:
+                self.echo_dropped += 1  # call audio from the speakers picked up by the mic: skip (and save ASR)
+                return
         t = self.transcriber.transcribe(u)
         if is_hallucination(t, duration=u.duration):
             return
@@ -181,7 +198,6 @@ class Pipeline:
         prev = self._last_text.get(u.channel)
         if prev and u.duration < 1.5 and norm == prev[0] and u.t_start - prev[1] < 10.0:
             return  # the same short phrase again right away: repeated hallucination
-        speaker = self.labeler.label(u)
         if self.echo.is_echo(speaker, u.t_start, u.t_end, text):
             return
         line = self.writer.append(speaker, u.t_start, u.t_end, t.lang, text)

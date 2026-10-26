@@ -28,6 +28,13 @@ class Config:
     echo_containment: float = 0.8
     echo_min_tokens: int = 3
     echo_window_s: float = 1.0
+    echo_overlap: float = 0.5  # mic speech (not you) that overlaps call audio this much is speaker echo
+    my_names: tuple[str, ...] = ("Roman", "Roma", "Роман", "Романе", "Рома", "Ромо", "Ромчик")
+    suggest_delay_s: float = 1.5  # wait for the question to finish before suggesting an answer
+    suggest_min_gap_s: float = 15.0  # between automatic suggestions for plain questions (names always trigger)
+    suggest_context_lines: int = 40
+    project_tools: tuple[str, ...] = ("Read", "Grep", "Glob")  # read-only tools inside the session's project
+    project_max_turns: int = 6
     sessions_dir: Path = field(default_factory=lambda: Path("~/Desktop/Work/OnTrack/sessions").expanduser())
     app_support_dir: Path = field(
         default_factory=lambda: Path("~/Library/Application Support/OnTrack").expanduser()

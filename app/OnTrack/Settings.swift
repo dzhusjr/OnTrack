@@ -1,4 +1,5 @@
 import Foundation
+import OnTrackCore
 
 /// App-side settings (UserDefaults). Engine settings live in ~/Library/Application Support/OnTrack/config.toml.
 struct Settings {
@@ -53,6 +54,43 @@ struct Settings {
     var autoShowOverlay: Bool {
         get { defaults.object(forKey: "autoShowOverlay") as? Bool ?? true }
         nonmutating set { defaults.set(newValue, forKey: "autoShowOverlay") }
+    }
+
+    /// Folder Claude works in for this session's answers (e.g. a code project). nil = none.
+    var projectDir: String? {
+        get { defaults.string(forKey: "projectDir") }
+        nonmutating set {
+            defaults.set(newValue, forKey: "projectDir")
+            if let p = newValue { recentProjects = Array(([p] + recentProjects.filter { $0 != p }).prefix(6)) }
+        }
+    }
+
+    var recentProjects: [String] {
+        get { (defaults.stringArray(forKey: "recentProjects") ?? []).filter { FileManager.default.fileExists(atPath: $0) } }
+        nonmutating set { defaults.set(newValue, forKey: "recentProjects") }
+    }
+
+    /// "auto" or a language code ("uk", "en", "nl") to lock transcription to.
+    var sessionLanguage: String {
+        get { defaults.string(forKey: "sessionLanguage") ?? "auto" }
+        nonmutating set { defaults.set(newValue, forKey: "sessionLanguage") }
+    }
+
+    /// Draft a reply when someone says your name.
+    var suggestReplies: Bool {
+        get { defaults.object(forKey: "suggestReplies") as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: "suggestReplies") }
+    }
+
+    /// Interview mode: also draft a reply to every question someone else asks.
+    var interviewMode: Bool {
+        get { defaults.object(forKey: "interviewMode") as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: "interviewMode") }
+    }
+
+    var sessionOptions: SessionOptions {
+        SessionOptions(projectDir: projectDir, languages: sessionLanguage == "auto" ? [] : [sessionLanguage],
+                       assist: suggestReplies, interview: interviewMode)
     }
 
     var echoCancellation: Bool {

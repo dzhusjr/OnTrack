@@ -7,6 +7,19 @@ public struct OverlayLine: Equatable, Sendable {
     public let tStart: Double
 }
 
+/// A drafted reply for when someone addresses you (streams in, then stays until dismissed or replaced).
+public struct Suggestion: Equatable, Sendable {
+    public let id: String
+    public var text: String
+    public var done: Bool
+
+    public init(id: String, text: String = "", done: Bool = false) {
+        self.id = id
+        self.text = text
+        self.done = done
+    }
+}
+
 /// Grey live preview of the phrase currently being spoken on one channel.
 public struct PreviewLine: Equatable, Sendable {
     public let channel: Int
@@ -48,6 +61,8 @@ public struct OverlayState: Equatable {
     public var autoShow = true  // show the live bar automatically when recording starts
     public var liveTranscription = true  // off = recording only; transcribed when the session is saved
     public var paused = false  // recording paused: nothing captured until resumed
+    public var suggestion: Suggestion?
+    public var addressedSeqs: Set<Int> = []  // lines where someone said your name / asked you
     public var mode: OverlayMode = .hidden
     public var lines: [OverlayLine] = []
     public var partials: [PreviewLine] = []  // at most one per channel, mic first
@@ -90,6 +105,8 @@ public struct OverlayState: Equatable {
         lines = []
         partials = []
         lastSeq = -1
+        suggestion = nil
+        addressedSeqs = []
         answer = ""
         lastQuestion = ""
         endCard = nil
@@ -107,6 +124,8 @@ public enum OverlayEvent: Equatable {
     case hide
     case toggleLive
     case togglePause
+    case requestSuggestion(id: String)
+    case dismissSuggestion
     case deferredUntilPower
     case choose(FinalizeAction)
     case dismiss
@@ -148,6 +167,13 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.progress = nil
         s.mode = s.recording ? .collapsed : .hidden
         s.toast = "Saved — transcription will finish when your Mac is plugged in"
+    case let .requestSuggestion(id):
+        guard s.recording || s.sessionId != nil else { return [] }
+        s.suggestion = Suggestion(id: id)
+        if s.mode == .hidden { s.mode = .collapsed }
+        return [.suggest(id: id)]
+    case .dismissSuggestion:
+        s.suggestion = nil
     case .togglePause:
         guard s.recording else { return [] }
         s.paused.toggle()
@@ -247,6 +273,19 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         }
         s.mode = path.isEmpty ? (s.recording ? .collapsed : .hidden) : .done
         if path.isEmpty { s.endCard = nil }
+    case let .addressed(sid, seq, _, _):
+        guard sid == s.sessionId else { return [] }
+        s.addressedSeqs.insert(seq)
+        if s.mode == .hidden && s.recording { s.mode = .collapsed }  // you were asked something: show the bar
+    case let .suggestionDelta(id, text):
+        if s.suggestion?.id != id { s.suggestion = Suggestion(id: id) }
+        s.suggestion?.text += text
+        if s.mode == .hidden && s.recording { s.mode = .collapsed }
+    case let .suggestionDone(id):
+        guard s.suggestion?.id == id else { return [] }
+        s.suggestion?.done = true
+        let t = s.suggestion?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if t.isEmpty || t == "—" || t == "-" { s.suggestion = nil }  // nothing worth saying
     case let .enrollDone(score):
         s.toast = String(format: "Voiceprint saved (match %.2f)", score)
     case let .error(err):

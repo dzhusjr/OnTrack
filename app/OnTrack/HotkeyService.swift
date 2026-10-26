@@ -11,6 +11,7 @@ final class HotkeyService {
     static let optionShiftS = (keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey | shiftKey))
     static let optionShiftL = (keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(optionKey | shiftKey))
     static let optionShiftP = (keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(optionKey | shiftKey))
+    static let optionShiftA = (keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(optionKey | shiftKey))
 
     @discardableResult
     func register(id: UInt32, keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) -> Bool {
