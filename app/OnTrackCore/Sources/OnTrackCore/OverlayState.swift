@@ -7,6 +7,17 @@ public struct OverlayLine: Equatable, Sendable {
     public let tStart: Double
 }
 
+/// One finished question and its answer in the overlay's Q&A thread.
+public struct QAExchange: Equatable, Sendable {
+    public let question: String
+    public let answer: String
+
+    public init(question: String, answer: String) {
+        self.question = question
+        self.answer = answer
+    }
+}
+
 /// A drafted reply for when someone addresses you (streams in, then stays until dismissed or replaced).
 public struct Suggestion: Equatable, Sendable {
     public let id: String
@@ -62,6 +73,7 @@ public struct OverlayState: Equatable {
     public var liveTranscription = true  // off = recording only; transcribed when the session is saved
     public var paused = false  // recording paused: nothing captured until resumed
     public var suggestion: Suggestion?
+    public var qaHistory: [QAExchange] = []  // earlier questions this session (newest last), shown above the latest
     public var addressedSeqs: Set<Int> = []  // lines where someone said your name / asked you
     public var mode: OverlayMode = .hidden
     public var lines: [OverlayLine] = []
@@ -107,6 +119,7 @@ public struct OverlayState: Equatable {
         lastSeq = -1
         suggestion = nil
         addressedSeqs = []
+        qaHistory = []
         answer = ""
         lastQuestion = ""
         endCard = nil
@@ -153,6 +166,10 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
     case let .submitQuestion(id):
         let q = s.question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !s.asking else { return [] }
+        if !s.lastQuestion.isEmpty, !s.answer.isEmpty {  // keep the thread: the new question may be a follow-up
+            s.qaHistory.append(QAExchange(question: s.lastQuestion, answer: s.answer))
+            if s.qaHistory.count > 3 { s.qaHistory.removeFirst(s.qaHistory.count - 3) }
+        }
         s.asking = true
         s.askId = id
         s.answer = ""

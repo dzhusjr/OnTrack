@@ -32,3 +32,21 @@ def test_failure_records_unanswered_and_reraises(tmp_path):
     with pytest.raises(LlmError):
         list(qa.ask(w.dir, "Q?", now=datetime(2026, 10, 23, 14, 31)))
     assert "_(unanswered: llm_timeout)_" in (w.dir / "qa.md").read_text()
+
+
+def test_follow_up_sees_earlier_questions(tmp_path):
+    from ontrack.qa import recent_exchanges
+
+    (tmp_path / "transcript.md").write_text("`00:01:00` **Them:** Deploy is on Friday, Kafka migration next week.\n")
+    (tmp_path / "qa.md").write_text(
+        "## Q (10:01) when is the deploy?\n\n**A:** Friday [00:01:00].\n\n"
+        "## Q (10:02) who owns it?\n\n**A:** _(unanswered: llm_timeout)_\n\n"
+        "## Suggested reply (10:03) to: Roman?\n\nSure.\n\n")
+    assert recent_exchanges((tmp_path / "qa.md").read_text()) == [("when is the deploy?", "Friday [00:01:00].")]
+    runner = FakeRunner([["Next week."]])
+    out = "".join(QaService(runner, load_config(None)).ask(tmp_path, "and the migration?"))
+    assert out == "Next week."
+    p = runner.prompts[0]
+    assert "<earlier_questions>" in p and "Q: when is the deploy?\nA: Friday [00:01:00]." in p
+    assert p.rstrip().endswith("Question: and the migration?")
+    assert "(10:0" in (tmp_path / "qa.md").read_text()

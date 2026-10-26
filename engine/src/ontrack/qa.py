@@ -1,6 +1,7 @@
 """Live follow-up questions about the running session (spec §4.2 qa)."""
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Iterator
 from datetime import datetime
@@ -14,8 +15,21 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+_QA_BLOCK = re.compile(r"^## Q \(\d\d:\d\d\) (.+?)\n\n\*\*A:\*\* (.*?)(?=\n## |\Z)", re.S | re.M)
+
+
+def recent_exchanges(qa_md: str, n: int = 4) -> list[tuple[str, str]]:
+    """Last n question/answer pairs from qa.md (unanswered ones skipped), oldest first."""
+    pairs = [(q.strip(), a.strip()) for q, a in _QA_BLOCK.findall(qa_md)]
+    return [(q, a) for q, a in pairs if a and not a.startswith("_(unanswered")][-n:]
+
+
 def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = "Roman",
-                    project: str | None = None) -> str:
+                    project: str | None = None, history: list[tuple[str, str]] | None = None) -> str:
+    earlier = "".join(f"Q: {q}\nA: {a}\n\n" for q, a in (history or []))
+    earlier_block = (f"<earlier_questions>\n{earlier.strip()}\n</earlier_questions>\n"
+                     "The new question may be a follow-up to these: resolve \"it\", \"that\", \"and X?\" from them.\n\n"
+                     ) if earlier else ""
     project_hint = (f"You are inside {me}'s project folder \"{project}\": read files there when the question is "
                     "about the project or its code.\n") if project else ""
     return (
@@ -30,6 +44,7 @@ def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = 
         "Answer in the same language as the question.\n\n"
         f"<transcript>\n{transcript_md.strip()}\n</transcript>\n\n"
         f"<my_notes>\n{notes_md.strip()}\n</my_notes>\n\n"
+        + earlier_block +
         f"Question: {question.strip()}\n"
     )
 
@@ -55,7 +70,8 @@ class QaService:
         me = self.cfg.my_names[0] if self.cfg.my_names else "Roman"
         with self._lock:
             prompt = build_qa_prompt(_read(session_dir / "transcript.md"), _read(session_dir / "notes.md"), question,
-                                     me=me, project=Path(project_dir).name if project_dir else None)
+                                     me=me, project=Path(project_dir).name if project_dir else None,
+                                     history=recent_exchanges(_read(session_dir / "qa.md")))
             parts: list[str] = []
             try:
                 for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project_dir):

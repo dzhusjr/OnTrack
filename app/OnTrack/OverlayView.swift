@@ -169,15 +169,12 @@ struct OverlayView: View {
     private var askSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider().opacity(0.4)
-            HStack(spacing: 8) {
-                Image(systemName: "sparkle.magnifyingglass").foregroundStyle(.secondary)
-                TextField("Ask about this session…", text: store.question)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .focused($questionFocused)
-                    .onSubmit { store.submitQuestion() }
-                    .disabled(s.asking)
-                if s.asking { ProgressView().controlSize(.small) }
+            ForEach(Array(s.qaHistory.enumerated()), id: \.offset) { _, ex in  // earlier questions, dimmed
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ex.question).font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary)
+                    Text(LocalizedStringKey(ex.answer)).font(.system(size: 12)).foregroundStyle(.secondary)
+                        .lineLimit(2).textSelection(.enabled)
+                }
             }
             if !s.lastQuestion.isEmpty {
                 Text(s.lastQuestion).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
@@ -189,6 +186,16 @@ struct OverlayView: View {
                     .lineLimit(12)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle.magnifyingglass").foregroundStyle(.secondary)
+                TextField(s.lastQuestion.isEmpty ? "Ask about this session…" : "Ask a follow-up…", text: store.question)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .focused($questionFocused)
+                    .onSubmit { store.submitQuestion() }
+                    .disabled(s.asking)
+                if s.asking { ProgressView().controlSize(.small) }
             }
         }
         .onAppear { questionFocused = true }

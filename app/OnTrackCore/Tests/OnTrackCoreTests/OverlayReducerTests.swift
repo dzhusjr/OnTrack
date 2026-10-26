@@ -391,3 +391,21 @@ final class SuggestionReducerTests: XCTestCase {
         XCTAssertEqual(obj["interview"] as? Bool, true)
     }
 }
+
+final class FollowUpTests: XCTestCase {
+    func testAskingAgainKeepsTheThread() {
+        var s = OverlayState()
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+        for (i, q) in ["when is the deploy?", "and the migration?", "who owns it?", "why?", "ok?"].enumerated() {
+            reduce(&s, .questionChanged(q))
+            reduce(&s, .submitQuestion(id: "q\(i)"))
+            reduce(&s, .engine(.answerDelta(id: "q\(i)", text: "A\(i)")))
+            reduce(&s, .engine(.answerDone(id: "q\(i)")))
+        }
+        XCTAssertEqual(s.lastQuestion, "ok?")
+        XCTAssertEqual(s.answer, "A4")
+        XCTAssertEqual(s.qaHistory.map(\.question), ["and the migration?", "who owns it?", "why?"])  // last 3 kept
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s2", degraded: false))))
+        XCTAssertTrue(s.qaHistory.isEmpty)  // new session, new thread
+    }
+}
