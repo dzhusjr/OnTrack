@@ -11,8 +11,9 @@ uv sync --extra models       # Mac only: mlx-whisper, silero-vad, pyannote
 
 ## Mac setup for real models (Task 10 / M1 acceptance)
 
-1. Hugging Face (free): create a token at <https://huggingface.co/settings/tokens>, then accept the terms on
-   `pyannote/wespeaker-voxceleb-resnet34-LM`, `pyannote/speaker-diarization-3.1`, `pyannote/segmentation-3.0` and `pyannote/speaker-diarization-community-1`. Export it: `export HF_TOKEN=hf_...`
+1. Hugging Face (free): follow step 2 of the main README (accept the 4 pyannote repos, Read token), then
+   `scripts/dev.sh setup` — it checks access first and only then downloads and verifies every model
+   (`uv run ontrack models check|download|verify` does the same by hand).
 2. Install voices Samantha, Daniel, Milena, Lesya (System Settings → Accessibility → Spoken Content → Manage Voices).
 3. Run:
    ```bash

@@ -130,7 +130,14 @@ def main(argv: list[str] | None = None, backends: Backends | None = None, diariz
     fz.add_argument("--config")
     fz.add_argument("--no-final-model", dest="final_model", action="store_false",
                     help="re-transcribe with the live model instead of full large-v3")
+    md = sub.add_parser("models", help="check Hugging Face access, download all models, verify the offline cache")
+    md.add_argument("action", choices=["check", "download", "verify"])
+    md.add_argument("--config")
     args = p.parse_args(argv)
+    if args.cmd == "models":
+        from .models_setup import run_cli
+
+        return run_cli(_config(args), args.action)
     if args.cmd == "sessions":
         return _sessions(args)
     if args.cmd == "finalize":
