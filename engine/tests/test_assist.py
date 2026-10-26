@@ -44,15 +44,30 @@ def test_suggest_prompt_is_brief_first_person_and_project_aware():
 
 
 # ---- language -------------------------------------------------------------------------------------
-def test_short_utterance_keeps_channel_language_and_ties_prefer_it():
-    asr = LangAsr({"en": 0.6, "uk": 0.4}, {"en": ("It's clear.", -0.30), "uk": ("Зрозуміло.", -0.45)})
+def test_short_utterance_keeps_channel_language_and_close_calls_stay():
+    asr = LangAsr({"en": 0.55, "uk": 0.45}, {"en": ("It's clear.", -0.30), "uk": ("Зрозуміло.", -0.40)})
     tx = Transcriber(asr, load_config(None))
     tx._last_lang[Channel.SYSTEM] = "uk"
-    assert tx.transcribe(utt(Channel.SYSTEM, 0, 1.2)).text == "Зрозуміло."  # short: no detection at all
+    assert tx.transcribe(utt(Channel.SYSTEM, 0, 1.2)).text == "Зрозуміло."  # short: stays Ukrainian
     assert [c[0] for c in asr.calls] == ["uk"]
     asr.calls.clear()
-    t = tx.transcribe(utt(Channel.SYSTEM, 0, 4.0))  # long: en+uk decoded; close scores → stay in Ukrainian
+    t = tx.transcribe(utt(Channel.SYSTEM, 0, 4.0))  # long: en+uk decoded; close call → stay in Ukrainian
     assert t.lang == "uk" and sorted(c[0] for c in asr.calls) == ["en", "uk"]
+
+
+def test_switching_from_english_to_ukrainian_is_not_translated():
+    # the screenshot: the mic had been speaking English, Roman switches to Ukrainian
+    asr = LangAsr({"uk": 0.7, "en": 0.3}, {"en": ("I will tell you what the Ukrainian is saying.", -0.20),
+                                           "uk": ("Я розкажу, що зараз відбувається.", -0.35)})
+    tx = Transcriber(asr, load_config(None))
+    tx._last_lang[Channel.MIC] = "en"
+    t = tx.transcribe(utt(Channel.MIC, 0, 3.0))
+    assert t.lang == "uk" and [c[0] for c in asr.calls] == ["uk"]  # ID is sure: no English decode at all
+    asr2 = LangAsr({"uk": 0.5, "en": 0.4, "ru": 0.1}, {"en": ("I will tell you what the Ukrainian is saying.", -0.20),
+                                                       "uk": ("Я розкажу, що зараз відбувається.", -0.35)})
+    tx2 = Transcriber(asr2, load_config(None))
+    tx2._last_lang[Channel.MIC] = "en"
+    assert tx2.transcribe(utt(Channel.MIC, 0, 3.0)).lang == "uk"  # unsure ID: uk (0.6 incl. ru) still wins
 
 
 def test_clear_switch_still_happens():
@@ -342,3 +357,11 @@ def test_second_reply_is_about_the_newest_question_only(dirs):
     assert "Django" in latest(first)
     assert "prefetch" in latest(second) and "Django" not in latest(second)
     assert "never answer them again" in second
+
+
+def test_real_english_after_ukrainian_still_switches_when_id_is_unsure():
+    asr = LangAsr({"en": 0.55, "uk": 0.45}, {"en": ("Let's move the ticket to review.", -0.25),
+                                             "uk": ("Летс мув зе тікет ту рев'ю.", -0.9)})
+    tx = Transcriber(asr, load_config(None))
+    tx._last_lang[Channel.MIC] = "uk"
+    assert tx.transcribe(utt(Channel.MIC, 0, 3.0)).lang == "en"

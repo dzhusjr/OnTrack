@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections import deque
 from typing import Protocol
 
+import math
+
 import numpy as np
 
 from .config import Config
@@ -17,8 +19,12 @@ class AsrBackend(Protocol):
     def run(self, samples: np.ndarray, language: str, initial_prompt: str | None) -> Transcript: ...
 
 
-SHORT_KEEP_S = 1.5  # shorter utterances keep the channel's current language
-CONFIDENT = 0.8  # language-ID probability above which we decode once
+SHORT_KEEP_S = 1.5  # shorter utterances keep the channel's current language…
+SHORT_KEEP_MIN_P = 0.15  # …unless language ID clearly says otherwise
+CONFIDENT = 0.6  # language-ID probability above which we decode once, in that language
+PRIOR_W = 0.3  # weight of language ID when comparing decodes (per-token logprob units)
+STICKY = 0.2  # bonus for staying in the non-English language the channel was just speaking
+EN_DOUBT = 0.1  # English decodes need a bit more evidence unless language ID is sure  # language-ID probability above which we decode once
 # Whisper's language ID is confidently wrong toward Russian on Ukrainian speech, so a Russian pick is always
 # checked against Ukrainian; a short native anchor prompt keeps Ukrainian spelling from drifting.
 # Whisper copies the style of its prompt: a short, properly punctuated native sentence gives capitals,
@@ -75,25 +81,42 @@ class Transcriber:
         last = self._last_lang.get(u.channel)
         if last not in allowed:
             last = None
-        if len(allowed) == 1:
-            candidates = allowed  # language locked for this session: no detection, no translation risk
-        elif last is not None and u.duration < SHORT_KEEP_S:
-            candidates = [last]  # language ID on a second of audio is a coin flip: stay in the conversation's language
+        if len(allowed) == 1:  # language locked for this session: no detection, no translation risk
+            return self._decide(u, allowed, {allowed[0]: 1.0}, last)
+        probs = dict(self.backend.detect_language(u.samples))
+        if "uk" in allowed and "ru" not in allowed:  # Whisper's ID calls Ukrainian "Russian" a lot
+            probs["uk"] = probs.get("uk", 0.0) + probs.pop("ru", 0.0)
+        ranked = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))
+        top = ranked[0]
+        if probs.get(top, 0.0) >= CONFIDENT:
+            candidates = [top]  # language ID is sure: decoding in another language would only *translate*
+        elif last is not None and u.duration < SHORT_KEEP_S and probs.get(last, 0.0) >= SHORT_KEEP_MIN_P:
+            candidates = [last]  # a second of audio: stay in the conversation's language unless ID clearly disagrees
         else:
-            probs = self.backend.detect_language(u.samples)
-            ranked = sorted(allowed, key=lambda l: (-probs.get(l, 0.0), allowed.index(l)))
-            candidates = ranked[:1] if probs.get(ranked[0], 0.0) >= CONFIDENT or len(ranked) < 2 else ranked[:2]
+            candidates = ranked[:2]
             if "ru" in candidates and "uk" in allowed and "uk" not in candidates:
                 candidates.append("uk")
             if last is not None and last not in candidates:
-                candidates.append(last)  # always try the language the channel was just speaking
+                candidates.append(last)
+        return self._decide(u, candidates, probs, last)
+
+    def _decide(self, u: Utterance, candidates: list[str], probs: dict, last: str | None) -> Transcript:
+        """Decode each candidate; score = Whisper's confidence + how likely language ID found that language.
+        A Ukrainian phrase decoded "in English" is a fluent translation that can score well on its own,
+        so the language-ID prior is what keeps it in Ukrainian."""
         results = [(l, self._run(u.samples, l, self._prompt(u.channel, l, u.duration))) for l in candidates]
         results = [(l, t) for l, t in results if t.text.strip()] or results
-        best_lp = max(t.avg_logprob for _, t in results)
-        close = [(l, t) for l, t in results if t.avg_logprob >= best_lp - self.cfg.lang_tie_margin]
-        # ties go to the language already being spoken: a Ukrainian phrase decoded "in English" is a fluent
-        # translation and often scores as well as the real transcript
-        lang, best = min(close, key=lambda lt: (lt[0] != last, allowed.index(lt[0])))
+
+        def score(lt):
+            l, t = lt
+            sc = t.avg_logprob + PRIOR_W * math.log(max(probs.get(l, 0.0), 1e-3))
+            if l == last and l != "en":
+                sc += STICKY  # stay in Ukrainian/Dutch through unclear bits…
+            if l == "en" and probs.get("en", 0.0) < CONFIDENT:
+                sc -= EN_DOUBT  # …because the usual failure is Whisper *translating* into English, not the reverse
+            return sc
+
+        lang, best = max(results, key=score)
         self._last_lang[u.channel] = lang
         return best
 
