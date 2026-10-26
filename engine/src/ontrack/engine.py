@@ -92,6 +92,7 @@ class EngineService:
         self.style = SpeechStyle(cfg.app_support_dir / "my_speech.jsonl", cfg.sessions_dir)
         self.digest = WorkDigest()
         self._last_auto_suggest = -1e9
+        self._answered_seq = -1  # replies cover lines up to here; the next Reply starts after it
         self.state = "idle"
         self.degraded = False
         self.writer: SessionWriter | None = None
@@ -294,6 +295,14 @@ class EngineService:
                 self._send_now(self._error("bad_config", str(e)))
 
     # ---- sessions -----------------------------------------------------------------------------------
+    def _latest_lines(self, session_dir: Path, trigger_seq: int | None) -> tuple[str, int]:
+        """The lines a reply is about: since the last answered one (or from the trigger), at most 4."""
+        lines = [l for l in read_lines(session_dir) if l.speaker != Speaker.NOTE]
+        start = trigger_seq if trigger_seq is not None else self._answered_seq + 1
+        fresh = [l for l in lines if l.seq >= start][-4:] or lines[-3:]
+        text = "\n".join(f"{l.speaker.value}: {l.text}" for l in fresh)
+        return text, (fresh[-1].seq if fresh else self._answered_seq)
+
     def _start_session(self, name: str, session_id: str | None) -> None:
         if self.state == "recording":
             if session_id and self.writer and session_id == self.writer.id:
@@ -314,6 +323,7 @@ class EngineService:
             self.writer = SessionWriter.start(self.cfg.sessions_dir, name, datetime.now())
             self._resume_last_s = None
             log.info("started session %s", self.writer.id)
+        self._answered_seq = -1
         self._voiceprint = load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy")
         if self._voiceprint is None:
             self._send_now(self._error("no_voiceprint",
@@ -613,9 +623,11 @@ class EngineService:
         if self._suggest_lock.locked():
             return  # one suggestion at a time; the newest context is picked up by the running one
         self._last_auto_suggest = now
-        self._suggest(f"auto-{line.seq}", trigger=line.text, delay=self.cfg.suggest_delay_s, auto=True)
+        self._suggest(f"auto-{line.seq}", trigger=line.text, delay=self.cfg.suggest_delay_s, auto=True,
+                      trigger_seq=line.seq)
 
-    def _suggest(self, sid: str, trigger: str | None, delay: float, auto: bool) -> None:
+    def _suggest(self, sid: str, trigger: str | None, delay: float, auto: bool,
+                 trigger_seq: int | None = None) -> None:
         session_dir = self._session_dir_for_qa()
         if session_dir is None:
             self.send(self._error("no_session", "Start a session first."))
@@ -637,20 +649,23 @@ class EngineService:
                 style = style_block(me, LANG_NAMES.get(lang or "", None),
                                     self.style.samples(lang, self.cfg.style_samples))
                 work = self.digest.get(project)
+                latest, upto = self._latest_lines(session_dir, trigger_seq)  # after the delay: the full question
                 # connectors only when the talk is about tickets, mail, calendar…: MCP start-up costs seconds
-                recent = "\n".join(tail.splitlines()[-6:])
-                connectors = bool(self.opts["connectors"]) and needs_connectors(said or "", recent)
+                connectors = bool(self.opts["connectors"]) and needs_connectors(said or "", latest)
                 name = project.name if project else None
                 if said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
                     said = "Reply"
-                    prompt = build_reply_prompt(tail, me, name, work=work, style=style, connectors=connectors)
+                    prompt = build_reply_prompt(tail, me, name, work=work, style=style, connectors=connectors,
+                                                latest=latest)
                 else:
-                    prompt = build_suggest_prompt(tail, said, me, name, work=work, style=style, connectors=connectors)
+                    prompt = build_suggest_prompt(tail, said, me, name, work=work, style=style, connectors=connectors,
+                                                  latest=latest)
                 parts: list[str] = []
                 for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project, connectors):
                     parts.append(chunk)
                     self.send({"type": "suggestion_delta", "id": sid, "text": chunk})
                 reply = "".join(parts).strip()
+                self._answered_seq = max(self._answered_seq, upto)  # the next Reply moves on to newer lines
                 if reply and reply != "—":
                     with open(session_dir / "qa.md", "a", encoding="utf-8") as f:
                         f.write(f"## Suggested reply ({datetime.now():%H:%M}) to: {said.strip()}\n\n{reply}\n\n")

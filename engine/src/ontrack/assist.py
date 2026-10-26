@@ -71,7 +71,16 @@ _RULES = (
 )
 
 
-def _context(tail: str, me: str, project: str | None, work: str, style: str, connectors: bool = False) -> str:
+def latest_block(latest: str) -> str:
+    if not latest.strip():
+        return ""
+    return ("Reply ONLY to these latest lines. The rest of the transcript is background: questions asked earlier "
+            "were already answered — never answer them again.\n"
+            f"<latest_lines>\n{latest.strip()}\n</latest_lines>\n\n")
+
+
+def _context(tail: str, me: str, project: str | None, work: str, style: str, connectors: bool = False,
+             latest: str = "") -> str:
     from .qa import CONNECTOR_HINT
 
     project_hint = (f"His project folder is \"{project}\" (you may read files there if a concrete fact is "
@@ -81,32 +90,34 @@ def _context(tail: str, me: str, project: str | None, work: str, style: str, con
         _RULES.format(me=me) + style + project_hint + (CONNECTOR_HINT if connectors else "") +
         f"Speakers: Me = {me}, Other = people in the room, Them = people on the call.\n\n"
         + work_block +
-        f"<recent_transcript>\n{tail.strip()}\n</recent_transcript>\n"
+        f"<recent_transcript>\n{tail.strip()}\n</recent_transcript>\n\n"
+        + latest_block(latest)
     )
 
 
 def build_suggest_prompt(tail: str, trigger: str, me: str, project: str | None, work: str = "",
-                         style: str = "", connectors: bool = False) -> str:
+                         style: str = "", connectors: bool = False, latest: str = "") -> str:
     """Someone said Roman's name / a trigger word (or asked a question in interview mode)."""
     return (
         f"You are {me}'s live meeting / interview helper. Someone just addressed {me}:\n"
         f"\"{trigger.strip()}\"\n\n"
         f"Write what {me} says back, in first person. At most 2 short sentences, or a short answer plus up to "
         "2 short bullets. If the line needs no reply, answer just: —\n"
-        + _context(tail, me, project, work, style, connectors)
+        + _context(tail, me, project, work, style, connectors, latest)
     )
 
 
 def build_reply_prompt(tail: str, me: str, project: str | None, work: str = "", style: str = "",
-                       connectors: bool = False) -> str:
+                       connectors: bool = False, latest: str = "") -> str:
     """The overlay's Reply button: answer the latest question, or say the one thing worth adding."""
     return (
         f"You are {me}'s live helper in a conversation. {me} pressed Reply: write what he says right now.\n"
-        "Look at the LAST few lines of the transcript.\n"
-        "- If someone asked a question there (to him or to the group): first the direct short answer, "
+        "Look at the latest lines (given separately at the end).\n"
+        "- If they contain a question (to him or to the group; it may be split over two lines): first the direct "
+        "short answer, "
         "then at most 2 short bullets of detail, only if they really help.\n"
         "- If there was no question: one thing really worth saying now — a point, a suggestion, or a sharp question "
         f"{me} could ask.\n"
         "First person, max 50 words total.\n"
-        + _context(tail, me, project, work, style, connectors)
+        + _context(tail, me, project, work, style, connectors, latest)
     )

@@ -314,3 +314,31 @@ def test_connectors_only_when_relevant(text, expected):
     from ontrack.connectors import needs_connectors
 
     assert needs_connectors(text) is expected
+
+
+def test_second_reply_is_about_the_newest_question_only(dirs):
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("How is Django different from FastAPI?")),
+                                   ({"en": 1}, tr("Why would you use prefetch related?"))],
+                            runner_script=[["Batteries included vs. API-first."], ["To avoid N+1 queries."]])
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "set_session_options", "assist": False})
+        await c.send({"type": "start_session", "name": "Interview"})
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.SYSTEM))
+        await c.expect(typ("line"))
+        await c.send({"type": "suggest", "id": "r1"})
+        await c.expect(typ("suggestion_done"))
+        await c.audio(frames(SPEECH, Channel.SYSTEM, start_ns=5_000_000_000))
+        await c.expect(typ("line"))
+        await c.send({"type": "suggest", "id": "r2"})
+        await c.expect(typ("suggestion_done"))
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+    first, second = svc.runner.prompts
+    latest = lambda p: p.split("<latest_lines>")[1].split("</latest_lines>")[0]  # noqa: E731
+    assert "Django" in latest(first)
+    assert "prefetch" in latest(second) and "Django" not in latest(second)
+    assert "never answer them again" in second
