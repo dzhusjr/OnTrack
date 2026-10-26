@@ -24,6 +24,7 @@ from .finalize import FinalizeDeps, finalize, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .assist import address_reason, build_reply_prompt, build_suggest_prompt, name_regex, transcript_tail
+from .connectors import needs_connectors
 from .qa import QaService, fast_stream
 from .style import SpeechStyle, conversation_language, style_block
 from .summarize import LANG_NAMES
@@ -636,7 +637,9 @@ class EngineService:
                 style = style_block(me, LANG_NAMES.get(lang or "", None),
                                     self.style.samples(lang, self.cfg.style_samples))
                 work = self.digest.get(project)
-                connectors = bool(self.opts["connectors"])
+                # connectors only when the talk is about tickets, mail, calendar…: MCP start-up costs seconds
+                recent = "\n".join(tail.splitlines()[-6:])
+                connectors = bool(self.opts["connectors"]) and needs_connectors(said or "", recent)
                 name = project.name if project else None
                 if said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
                     said = "Reply"
@@ -687,7 +690,7 @@ class EngineService:
         def job() -> None:
             try:
                 for chunk in self.qa.ask(session_dir, question, project_dir=self.opts["project_dir"],
-                                         connectors=bool(self.opts["connectors"])):
+                                         connectors=bool(self.opts["connectors"]) and needs_connectors(question)):
                     self.send({"type": "answer_delta", "id": qid, "text": chunk})
             except LlmError as e:
                 self.send(self._error(e.code, e.message))

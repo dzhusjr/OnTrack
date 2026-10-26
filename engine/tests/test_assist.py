@@ -285,3 +285,32 @@ def test_connectors_option_reaches_claude_with_a_read_only_hint(dirs):
     asyncio.run(run_with(svc, body))
     assert calls and calls[-1].get("connectors") is True
     assert "never create, change, send or delete" in svc.runner.prompts[-1]
+
+
+def test_name_in_a_line_labelled_me_still_counts_when_it_asks_something():
+    # the voiceprint put a nearby voice on "Me": the screenshot case
+    assert address_reason(line(Speaker.ME, "Okay, Roman, hello. Tell us how much will be 2 plus 2."), NAMES, False) == "name"
+    assert address_reason(line(Speaker.ME, "Роман, скажи статус"), NAMES, False) == "name"
+    assert address_reason(line(Speaker.ME, "Hi, I'm Roman, what do you need?"), NAMES, False) is None  # self-intro
+    assert address_reason(line(Speaker.ME, "Мене звати Роман, як справи?"), NAMES, False) is None
+    assert address_reason(line(Speaker.ME, "Roman here, joining now."), NAMES, False) is None  # no question
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Tell us how much will be 2 plus 2.", True), ("Скажіть, будь ласка, статус.", True),
+    ("Як справи з задачею", True), ("Vertel eens over je project.", True), ("We shipped it yesterday.", False),
+    ("Добре, дякую.", False)])
+def test_questions_without_question_mark(text, expected):
+    from ontrack.assist import is_question
+
+    assert is_question(text) is expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("how much is 2 plus 2", False), ("what's the status of 1549?", True), ("is CETL-231 merged?", True),
+    ("коли в нас зустріч з клієнтом?", True), ("check my email please", True), ("Добре, поїхали далі", False),
+    ("what did he say about the deploy", False)])
+def test_connectors_only_when_relevant(text, expected):
+    from ontrack.connectors import needs_connectors
+
+    assert needs_connectors(text) is expected

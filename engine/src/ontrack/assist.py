@@ -15,13 +15,40 @@ def name_regex(names: tuple[str, ...]) -> re.Pattern | None:
     return re.compile(rf"(?<!\w)(?:{alt})(?!\w)", re.IGNORECASE | re.UNICODE)
 
 
+# "I'm Roman" / "мене звати Роман": you saying your own name is not someone addressing you
+_SELF_INTRO = re.compile(
+    r"\b(i'?m|i am|my name is|this is|я|мене звати|меня зовут|ik ben|mijn naam is|ik heet)\s*,?\s*$",
+    re.IGNORECASE | re.UNICODE)
+
+# questions and requests without a "?" (speech recognition often drops it): "tell us…", "скажи…", "how much…"
+_ASKING = re.compile(
+    r"(?<!\w)(what|how|why|when|where|who|which|whose|can you|could you|would you|do you|did you|are you|have you|"
+    r"tell|explain|describe|walk us|give us|share|any (?:update|news|questions)|"
+    r"що|як|чому|коли|де|хто|який|яка|які|скільки|чи|скажи|скажіть|розкажи|розкажіть|поясни|поясніть|опиши|"
+    r"дай апдейт|поділись|"
+    r"wat|hoe|waarom|wanneer|waar|wie|welke|kun je|kunt u|vertel|leg uit)(?!\w)",
+    re.IGNORECASE | re.UNICODE)
+
+
+def is_question(text: str) -> bool:
+    return "?" in text or bool(_ASKING.search(text))
+
+
 def address_reason(line: Line, names: re.Pattern | None, interview: bool) -> str | None:
-    """'name' when someone says your name, 'question' (interview mode) when someone else asks anything."""
-    if line.speaker in (Speaker.ME, Speaker.NOTE) or not line.text.strip():
+    """'name' when someone says your name / a trigger word, 'question' (interview mode) when someone asks
+    or requests anything. Your own lines count only when they really address you (the voiceprint can
+    mislabel a nearby voice as you), never when you introduce yourself."""
+    text = line.text.strip()
+    if line.speaker == Speaker.NOTE or not text:
         return None
-    if names is not None and names.search(line.text):
-        return "name"  # your name or one of your trigger words
-    if interview and "?" in line.text:
+    if names is not None:
+        for m in names.finditer(text):
+            if line.speaker == Speaker.ME and _SELF_INTRO.search(text[: m.start()]):
+                continue
+            if line.speaker == Speaker.ME and not is_question(text):
+                continue  # you mentioning yourself in passing
+            return "name"
+    if interview and line.speaker != Speaker.ME and is_question(text):
         return "question"
     return None
 
