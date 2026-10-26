@@ -104,8 +104,9 @@ class FakeRunner:
         self.script = list(script)
         self.prompts: list[str] = []
 
-    def stream(self, prompt, timeout_s, project_dir=None):
+    def stream(self, prompt, timeout_s, project_dir=None, model=None):
         self.prompts.append(prompt)
+        self.models = getattr(self, "models", []) + [model]
         self.project_dirs = getattr(self, "project_dirs", []) + [project_dir]
         item = self.script.pop(0)
         if isinstance(item, Exception):

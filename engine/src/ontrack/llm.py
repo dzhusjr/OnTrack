@@ -51,10 +51,10 @@ class ClaudeRunner:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
 
-    def _cmd(self, exe: Path, extra: tuple[str, ...]) -> list[str]:
+    def _cmd(self, exe: Path, extra: tuple[str, ...], model: str | None = None) -> list[str]:
         return [
             str(exe), "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            "--model", self.cfg.llm_model, *extra,
+            "--model", model or self.cfg.llm_model, *extra,
         ]
 
     def project_args(self) -> tuple[str, ...]:
@@ -63,21 +63,22 @@ class ClaudeRunner:
         return ("--strict-mcp-config", "--tools", ",".join(tools), "--allowedTools", *tools,
                 "--max-turns", str(self.cfg.project_max_turns))
 
-    def stream(self, prompt: str, timeout_s: float, project_dir: Path | None = None) -> Iterator[str]:
+    def stream(self, prompt: str, timeout_s: float, project_dir: Path | None = None,
+               model: str | None = None) -> Iterator[str]:
         project = Path(project_dir).expanduser() if project_dir else None
         if project is not None and not project.is_dir():
             project = None
         extra = self.project_args() if project is not None else tuple(self.cfg.llm_extra_args)
         try:
-            yield from self._stream(prompt, timeout_s, extra, project)
+            yield from self._stream(prompt, timeout_s, extra, project, model)
         except LlmError as e:
             if e.code != "llm_unsupported" or not extra:
                 raise
             # older Claude Code without these flags: retry plain
-            yield from self._stream(prompt, timeout_s, (), project)
+            yield from self._stream(prompt, timeout_s, (), project, model)
 
     def _stream(self, prompt: str, timeout_s: float, extra: tuple[str, ...],
-                project: Path | None = None) -> Iterator[str]:
+                project: Path | None = None, model: str | None = None) -> Iterator[str]:
         exe = find_claude(self.cfg)
         if exe is None:
             raise LlmError("llm_missing", "Claude Code CLI not found — install it and run `claude` once to log in.")
@@ -85,7 +86,7 @@ class ClaudeRunner:
         env = dict(os.environ)
         env["PATH"] = os.pathsep.join([env.get("PATH", "")] + [os.path.expanduser(p) for p in _EXTRA_PATHS])
         proc = subprocess.Popen(
-            self._cmd(exe, extra), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            self._cmd(exe, extra, model), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             cwd=workdir, env=env, text=True, encoding="utf-8",
         )
         lines: queue.Queue[str | None] = queue.Queue()

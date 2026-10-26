@@ -88,9 +88,23 @@ struct Settings {
         nonmutating set { defaults.set(newValue, forKey: "interviewMode") }
     }
 
+    static let defaultTriggerWords = ["Roman", "Roma", "Роман", "Романе", "Рома", "Ромо", "Ромчик"]
+
+    /// Your name, nicknames and anything else that should get your attention (case-insensitive, whole words).
+    var triggerWords: [String] {
+        get { defaults.stringArray(forKey: "triggerWords") ?? Self.defaultTriggerWords }
+        nonmutating set { defaults.set(newValue, forKey: "triggerWords") }
+    }
+
+    /// Also copy each saved session's notes into "<project>/OnTrack Notes".
+    var saveNotesToProject: Bool {
+        get { defaults.object(forKey: "saveNotesToProject") as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: "saveNotesToProject") }
+    }
+
     var sessionOptions: SessionOptions {
         SessionOptions(projectDir: projectDir, languages: sessionLanguage == "auto" ? [] : [sessionLanguage],
-                       assist: suggestReplies, interview: interviewMode)
+                       assist: suggestReplies, interview: interviewMode, names: triggerWords)
     }
 
     var echoCancellation: Bool {

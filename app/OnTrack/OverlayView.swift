@@ -277,7 +277,7 @@ struct OverlayView: View {
     static func stageTitle(_ stage: String?) -> String {
         switch stage {
         case "separating": return "Separating speakers…"
-        case "retranscribing": return "Re-transcribing…"
+        case "retranscribing": return "Writing the accurate transcript…"
         case "summarizing": return "Summarizing…"
         case "saving", "done": return "Saving…"
         default: return "Preparing…"

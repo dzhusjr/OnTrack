@@ -147,14 +147,17 @@ public enum Inbound: Equatable, Sendable {
 public struct SessionOptions: Equatable, Sendable {
     public var projectDir: String?
     public var languages: [String]  // empty = automatic
-    public var assist: Bool  // draft a reply when someone says your name
+    public var assist: Bool  // auto-draft a reply when someone says your name / a trigger word
     public var interview: Bool  // … and for every question someone asks
+    public var names: [String]  // your name, nicknames and any trigger words; empty = engine default
 
-    public init(projectDir: String? = nil, languages: [String] = [], assist: Bool = true, interview: Bool = false) {
+    public init(projectDir: String? = nil, languages: [String] = [], assist: Bool = true, interview: Bool = false,
+                names: [String] = []) {
         self.projectDir = projectDir
         self.languages = languages
         self.assist = assist
         self.interview = interview
+        self.names = names
     }
 }
 
@@ -197,7 +200,7 @@ public enum Outbound: Equatable, Sendable {
         case let .setPaused(on): return ["type": "set_paused", "paused": on]
         case let .setSessionOptions(o):
             return ["type": "set_session_options", "project_dir": o.projectDir ?? NSNull(), "languages": o.languages,
-                    "assist": o.assist, "interview": o.interview]
+                    "assist": o.assist, "interview": o.interview, "names": o.names]
         case let .suggest(id): return ["type": "suggest", "id": id]
         }
     }

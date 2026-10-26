@@ -136,6 +136,7 @@ def test_options_pass_project_folder_to_claude_and_lock_language(dirs, tmp_path)
 
     asyncio.run(run_with(svc, body))
     assert svc.runner.project_dirs == [project] and '"cetl"' in svc.runner.prompts[0]
+    assert svc.runner.models == ["haiku"]  # live answers use the fastest model
 
 
 def test_manual_suggest_uses_last_thing_someone_else_said(dirs):
@@ -176,3 +177,31 @@ def test_runner_uses_project_cwd_and_read_only_tools(tmp_path, monkeypatch):
     assert Path(log["cwd"]).resolve() == project.resolve() and project.exists()
     argv = log["argv"]
     assert argv[argv.index("--tools") + 1] == "Read,Grep,Glob" and "--allowedTools" in argv and "Bash" not in argv
+
+
+def test_trigger_words_from_the_app_replace_the_default_names(dirs):
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("Any questions from the backend team?"))], runner_script=[["No."]])
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "set_session_options", "names": ["backend team", "Ромчик"], "assist": False})
+        await c.send({"type": "start_session", "name": "Standup"})
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.SYSTEM))
+        a = await c.expect(typ("addressed"))
+        assert a["reason"] == "name"
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+    assert svc.runner.prompts == []  # auto-suggest off: highlighted, no reply drafted
+
+
+def test_runner_passes_the_fast_model(tmp_path, monkeypatch):
+    exe = tmp_path / "claude"
+    exe.write_text(f"#!/bin/sh\nexec {sys.executable} {FAKE} \"$@\"\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "log.json"))
+    cfg = replace(load_config(None), claude_path=str(exe))
+    "".join(ClaudeRunner(cfg).stream("x", 10, model="haiku"))
+    argv = json.loads((tmp_path / "log.json").read_text())["argv"]
+    assert argv[argv.index("--model") + 1] == "haiku"

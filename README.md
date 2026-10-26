@@ -127,9 +127,10 @@ If you change a model in the engine config, run `scripts/dev.sh models` once to 
 | Live transcription on/off | ⌥⇧L, the bubble icon on the bar, or menu → Live Transcription. Off = record only; transcribed when you save |
 | Save battery | menu → Transcribe After Recording Only When Plugged In: on battery, Save keeps the audio and the heavy work (speaker separation, large-v3, summary) runs once you plug in |
 | Ask about the session | ⌥Space → type → Enter (Esc to collapse). Answers are kept to a few lines |
-| Someone says your name | the line gets a 👋 marker, the bar pops up, and a 1–2 line suggested reply appears (menu → Suggest a Reply When Someone Says My Name). Names are `my_names` in the engine config |
+| Someone says your name | the line gets a 👋 marker, the bar pops up, and a 1–2 line suggested reply appears. Menu → Names & Trigger Words… sets which words count (name, nicknames, anything); menu → Auto-Suggest Replies turns the drafted reply off (lines are still highlighted) |
 | Interview / meeting helper | menu → Interview Mode: a short suggested reply for every question someone asks you. ⌥⇧A drafts one for the latest question anytime |
-| Work inside a project | menu → Project → Choose Folder… (e.g. your CETL repo). Questions and suggested replies then use that folder (read-only) and its CLAUDE.md as context |
+| Work inside a project | menu → Project → Choose Folder… (e.g. your CETL repo). Questions and suggested replies then use that folder (read-only) and its CLAUDE.md as context. Project → Also Save Notes Into This Folder copies each saved session to `<project>/OnTrack Notes` |
+| Speed | live questions and suggested replies use the fastest Claude model (`fast_llm_model = "haiku"`); the end-of-session summary uses `llm_model` (Sonnet) |
 | Whole conversation in one language | menu → Language → Українська / English / Nederlands. Most accurate; stops short phrases being "translated" into English |
 | End of session | overlay card: **Save summary + transcript** (Enter) · Transcript only · Discard (click twice) |
 

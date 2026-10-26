@@ -39,6 +39,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var interview: () -> Bool
         var toggleInterview: () -> Void
         var suggestNow: () -> Void
+        var editTriggerWords: () -> Void
+        var saveNotesToProject: () -> Bool
+        var toggleSaveNotesToProject: () -> Void
     }
 
     static let languages: [(code: String, title: String)] = [
@@ -165,6 +168,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let choose = NSMenuItem(title: "Choose Folder…", action: #selector(chooseProject), keyEquivalent: "")
         choose.target = self
         projects.addItem(choose)
+        let saveHere = NSMenuItem(title: "Also Save Notes Into This Folder", action: current == nil ? nil : #selector(toggleSaveToProject),
+                                  keyEquivalent: "")
+        saveHere.target = self
+        saveHere.isEnabled = current != nil
+        saveHere.state = s.saveNotesToProject() ? .on : .off
+        saveHere.toolTip = "Copies each saved session to “OnTrack Notes” inside the project folder"
+        projects.addItem(saveHere)
         projectItem.submenu = projects
         projectItem.toolTip = "Claude answers questions and suggests replies with this folder (and its CLAUDE.md) as context"
         menu.addItem(projectItem)
@@ -184,8 +194,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         langItem.toolTip = "Lock transcription to one language when the whole conversation is in it (most accurate)"
         menu.addItem(langItem)
 
-        let assist = NSMenuItem(title: "Suggest a Reply When Someone Says My Name", action: #selector(toggleAssist),
-                                keyEquivalent: "")
+        let assist = NSMenuItem(title: "Auto-Suggest Replies", action: #selector(toggleAssist), keyEquivalent: "")
+        assist.toolTip = "Draft a short reply when someone says one of your trigger words (off = just highlight the line)"
         assist.target = self
         assist.state = s.assist() ? .on : .off
         menu.addItem(assist)
@@ -194,6 +204,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         interview.target = self
         interview.state = s.interview() ? .on : .off
         menu.addItem(interview)
+        add(menu, "Names & Trigger Words…", #selector(editTriggerWords))
         add(menu, "Suggest a Reply Now", #selector(suggestNow), key: "a", mods: [.option, .shift], enabled: state.recording)
         menu.addItem(.separator())
     }
@@ -204,6 +215,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func toggleAssist() { actions.session.toggleAssist() }
     @objc private func toggleInterview() { actions.session.toggleInterview() }
     @objc private func suggestNow() { actions.session.suggestNow() }
+    @objc private func editTriggerWords() { actions.session.editTriggerWords() }
+    @objc private func toggleSaveToProject() { actions.session.toggleSaveNotesToProject() }
 
     private func add(_ menu: NSMenu, _ title: String, _ sel: Selector, key: String = "",
                      mods: NSEvent.ModifierFlags = [.command], enabled: Bool = true) {

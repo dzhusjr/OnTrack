@@ -101,7 +101,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.store.showToast(self.settings.interviewMode ? "Interview mode: replies suggested for every question"
                                                                      : "Interview mode off")
                 },
-                suggestNow: { [weak self] in self?.suggestNow() }
+                suggestNow: { [weak self] in self?.suggestNow() },
+                editTriggerWords: { [weak self] in self?.editTriggerWords() },
+                saveNotesToProject: { [weak self] in self?.settings.saveNotesToProject ?? false },
+                toggleSaveNotesToProject: { [weak self] in
+                    guard let self else { return }
+                    self.settings.saveNotesToProject.toggle()
+                    self.store.showToast(self.settings.saveNotesToProject ? "Notes will also be saved into the project folder"
+                                                                          : "Notes no longer saved into the project folder")
+                }
             )
         ))
 
@@ -222,6 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !path.isEmpty, let folder = settings.exportFolder {
                 export(notesPath: path, to: folder)
             }
+            if !path.isEmpty, settings.saveNotesToProject, let project = settings.projectDir {
+                export(notesPath: path, to: URL(fileURLWithPath: project).appendingPathComponent("OnTrack Notes"))
+            }
         default:
             break
         }
@@ -291,6 +302,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sendSessionOptions()
         store.showToast(path.map { "Claude now answers with “\(URL(fileURLWithPath: $0).lastPathComponent)” as context" }
                         ?? "No project folder")
+    }
+
+    private func editTriggerWords() {
+        let alert = NSAlert()
+        alert.messageText = "Names & Trigger Words"
+        alert.informativeText = "When someone says one of these, the line is highlighted and (with Auto-Suggest on) "
+            + "a short reply is drafted. Separate with commas; case doesn't matter."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.stringValue = settings.triggerWords.joined(separator: ", ")
+        field.placeholderString = Settings.defaultTriggerWords.joined(separator: ", ")
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Reset to Default")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            let words = field.stringValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            settings.triggerWords = words.isEmpty ? Settings.defaultTriggerWords : words
+        case .alertThirdButtonReturn:
+            settings.triggerWords = Settings.defaultTriggerWords
+        default:
+            return
+        }
+        sendSessionOptions()
+        store.showToast("Listening for: \(settings.triggerWords.prefix(4).joined(separator: ", "))\(settings.triggerWords.count > 4 ? "…" : "")")
     }
 
     private func suggestNow() {

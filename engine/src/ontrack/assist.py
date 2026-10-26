@@ -20,7 +20,7 @@ def address_reason(line: Line, names: re.Pattern | None, interview: bool) -> str
     if line.speaker in (Speaker.ME, Speaker.NOTE) or not line.text.strip():
         return None
     if names is not None and names.search(line.text):
-        return "name"
+        return "name"  # your name or one of your trigger words
     if interview and "?" in line.text:
         return "question"
     return None

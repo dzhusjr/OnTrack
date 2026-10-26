@@ -34,11 +34,12 @@ def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = 
     )
 
 
-def _stream(runner, prompt: str, timeout_s: float, project_dir: Path | None):
-    """Pass the project folder only when there is one (test fakes and old runners take two arguments)."""
+def fast_stream(runner, cfg: Config, prompt: str, timeout_s: float, project_dir: Path | None = None):
+    """Live answers use the fastest model; the project folder is passed only when set."""
+    kwargs = {"model": cfg.fast_llm_model} if cfg.fast_llm_model else {}
     if project_dir:
-        return runner.stream(prompt, timeout_s, project_dir=project_dir)
-    return runner.stream(prompt, timeout_s)
+        kwargs["project_dir"] = project_dir
+    return runner.stream(prompt, timeout_s, **kwargs)
 
 
 class QaService:
@@ -57,7 +58,7 @@ class QaService:
                                      me=me, project=Path(project_dir).name if project_dir else None)
             parts: list[str] = []
             try:
-                for chunk in _stream(self.runner, prompt, self.cfg.qa_timeout_s, project_dir):
+                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project_dir):
                     parts.append(chunk)
                     yield chunk
             except LlmError as e:

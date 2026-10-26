@@ -24,7 +24,7 @@ from .finalize import FinalizeDeps, finalize, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .assist import address_reason, build_suggest_prompt, name_regex, transcript_tail
-from .qa import QaService
+from .qa import QaService, fast_stream
 from .recorder import AudioRecorder, recorded_seconds
 from .session import SessionWriter, paused_ranges, read_lines
 from .speaker import enroll, load_voiceprint
@@ -570,6 +570,9 @@ class EngineService:
             self.opts["languages"] = langs or None
             if self.pipeline is not None:
                 self.pipeline.transcriber.languages = self.opts["languages"]
+        if "names" in msg:
+            words = tuple(str(w).strip() for w in (msg.get("names") or ()) if str(w).strip())
+            self._names = name_regex(words or tuple(self.cfg.my_names))
         for key in ("assist", "interview"):
             if key in msg:
                 self.opts[key] = bool(msg[key])
@@ -617,8 +620,7 @@ class EngineService:
                 prompt = build_suggest_prompt(transcript_tail(session_dir, self.cfg.suggest_context_lines), said, me,
                                               project.name if project else None)
                 parts: list[str] = []
-                kwargs = {"project_dir": project} if project else {}
-                for chunk in self.runner.stream(prompt, self.cfg.qa_timeout_s, **kwargs):
+                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project):
                     parts.append(chunk)
                     self.send({"type": "suggestion_delta", "id": sid, "text": chunk})
                 reply = "".join(parts).strip()
