@@ -667,6 +667,12 @@ def main(argv: list[str] | None = None) -> int:
     default = load_config(None).app_support_dir / "config.toml"
     cfg = load_config(Path(args.config) if args.config else default)
     _setup_logging(cfg.app_support_dir / "logs")
+    from .models_setup import apply_offline_mode
+
+    if apply_offline_mode(cfg):
+        log.info("models verified — offline mode (no Hugging Face calls)")
+    else:
+        log.warning("models not verified offline — run scripts/dev.sh setup (Hugging Face is contacted on load)")
 
     def fallback():
         from .asr_mlx import MlxWhisperBackend

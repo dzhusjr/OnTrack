@@ -1,8 +1,9 @@
 # OnTrack — Manual Acceptance Checklist (spec §10)
 
-Run after `scripts/dev.sh all`. Tick each box; note failures with the time and what you saw.
+Run after `scripts/dev.sh all` (and `scripts/dev.sh doctor` shows no ✗). Tick each box; note failures with the time and what you saw.
 
 ## Setup
+- [ ] Engine log says "models verified — offline mode" (no Hugging Face requests after setup).
 - [ ] App launches as a menu-bar icon (no Dock icon); engine log `~/Library/Application Support/OnTrack/logs/engine.log` shows "engine listening".
 - [ ] Menu → Engine shows `idle` (model loads within ~30 s on first launch).
 - [ ] Enroll My Voice: talk 30 s → toast "Voiceprint saved (match ≥ 0.80)".
@@ -11,7 +12,7 @@ Run after `scripts/dev.sh all`. Tick each box; note failures with the time and w
 - [ ] ⌥⇧S starts; overlay appears top-center with a red dot and timer.
 - [ ] Your lines show a **blue** dot (Me), the other person's **amber** (Other).
 - [ ] New lines appear ≤ 3 s after a sentence ends; only the last 3 lines show.
-- [ ] Russian ↔ English switching is transcribed in the right language.
+- [ ] Ukrainian ↔ English ↔ Dutch switching is transcribed in the right language (never translated, never Russian).
 - [ ] ⌥Space → ask "what did they just say about X?" → streamed answer in the overlay; Esc returns focus to your previous app.
 - [ ] ⌥⇧S stops → end card → Enter → progress (Separating speakers → Re-transcribing → Summarizing → Saving) → "Saved to notes" → Open shows `notes/<session>/summary.md` with Speaker A/B labels in transcript.md.
 
@@ -28,4 +29,4 @@ Run after `scripts/dev.sh all`. Tick each box; note failures with the time and w
 - [ ] 3-hour session (lecture or a long YouTube video): engine memory stays < 4 GB (Activity Monitor), no crash.
 
 ## Notes sync
-- [ ] After saving, `notes/<session>/.pending_sync` exists; after the daily Cowork task runs (or asking Claude "sync OnTrack notes"), the notes appear in the OnTrack Claude Project and the marker is gone.
+- [ ] After saving, `notes/<session>/.pending_sync` exists; after asking Claude in Cowork to "sync OnTrack notes", the notes appear in the OnTrack Claude Project and the marker is gone.
