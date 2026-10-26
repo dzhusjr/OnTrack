@@ -101,14 +101,8 @@ test_all() {
 app() {
   cd "$ROOT/app"
   mkdir -p ~/Applications
-  if has_xcode && command -v xcodegen >/dev/null 2>&1; then
-    xcodegen generate --quiet
-    xcodebuild -project OnTrack.xcodeproj -scheme OnTrack -configuration Release \
-               -derivedDataPath build -quiet build
-    rm -rf ~/Applications/OnTrack.app
-    cp -R build/Build/Products/Release/OnTrack.app ~/Applications/
-  else
-    # Command Line Tools only: build with SwiftPM and assemble the .app bundle ourselves.
+    # Always SwiftPM (works with or without Xcode): our own bundle gets the app icon and the
+    # "OnTrack Local Signing" identity, so macOS keeps permissions across rebuilds.
     swift build -c release --product OnTrack
     local bin app
     bin="$(swift build -c release --show-bin-path)/OnTrack"
@@ -142,7 +136,6 @@ PLIST
       echo "• Signing ad-hoc — run 'scripts/dev.sh cert' once so permissions survive rebuilds."
       codesign --force --sign - "$app"
     fi
-  fi
   echo "✓ installed ~/Applications/OnTrack.app"
 }
 
