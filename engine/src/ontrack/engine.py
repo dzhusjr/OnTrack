@@ -23,7 +23,8 @@ from .control import NdjsonDecoder, ProtocolError, encode, validate
 from .finalize import FinalizeDeps, finalize, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
-from .assist import address_reason, build_reply_prompt, build_suggest_prompt, name_regex, transcript_tail
+from .assist import (address_reason, build_interview_prompt, build_reply_prompt, build_suggest_prompt, name_regex,
+                     transcript_tail)
 from .connectors import needs_connectors
 from .qa import QaService, fast_stream
 from .style import SpeechStyle, conversation_language, style_block
@@ -648,12 +649,19 @@ class EngineService:
                 lang = conversation_language(read_lines(session_dir))
                 style = style_block(me, LANG_NAMES.get(lang or "", None),
                                     self.style.samples(lang, self.cfg.style_samples))
-                work = self.digest.get(project)
+                interview = bool(self.opts["interview"])
+                # interview: general knowledge only — no project folder, no work summary, no connectors
+                proj = None if interview else project
+                work = self.digest.get(proj)
                 latest, upto = self._latest_lines(session_dir, trigger_seq)  # after the delay: the full question
                 # connectors only when the talk is about tickets, mail, calendar…: MCP start-up costs seconds
-                connectors = bool(self.opts["connectors"]) and needs_connectors(said or "", latest)
-                name = project.name if project else None
-                if said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
+                connectors = (not interview and bool(self.opts["connectors"])
+                              and needs_connectors(said or "", latest))
+                name = proj.name if proj else None
+                if interview:
+                    prompt = build_interview_prompt(tail, me, style=style, latest=latest, trigger=said)
+                    said = said or "Reply"
+                elif said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
                     said = "Reply"
                     prompt = build_reply_prompt(tail, me, name, work=work, style=style, connectors=connectors,
                                                 latest=latest)
@@ -661,7 +669,7 @@ class EngineService:
                     prompt = build_suggest_prompt(tail, said, me, name, work=work, style=style, connectors=connectors,
                                                   latest=latest)
                 parts: list[str] = []
-                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project, connectors):
+                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, proj, connectors):
                     parts.append(chunk)
                     self.send({"type": "suggestion_delta", "id": sid, "text": chunk})
                 reply = "".join(parts).strip()

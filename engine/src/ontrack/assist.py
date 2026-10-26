@@ -121,3 +121,27 @@ def build_reply_prompt(tail: str, me: str, project: str | None, work: str = "", 
         "First person, max 50 words total.\n"
         + _context(tail, me, project, work, style, connectors, latest)
     )
+
+
+def build_interview_prompt(tail: str, me: str, style: str = "", latest: str = "", trigger: str | None = None) -> str:
+    """Interview mode: answer like a strong candidate from general expertise — never from (or limited by)
+    the project folder, and never "I haven't done that"."""
+    asked = f"The interviewer just said:\n\"{trigger.strip()}\"\n\n" if trigger else ""
+    return (
+        f"You are {me}'s live interview helper. {me} is a software engineer (Python, Java, C++) in a technical "
+        "interview. Write what he answers right now.\n"
+        + asked +
+        "Answer from solid general engineering knowledge, as an experienced candidate: confident, correct and "
+        "practical — the standard approach, the key trade-off, a concrete tool or example. Speak in first person "
+        "(\"I'd…\", \"I usually…\", \"the way I'd do it…\"). Never say he hasn't done it, doesn't know, or only "
+        "works on something else; never mention his current projects unless the question asks about them. "
+        "Don't invent employers, numbers or past events.\n"
+        "Format: the direct short answer first (one sentence), then at most 2 short bullets of detail if they help. "
+        "Max 60 words. If the latest lines contain no question, give one sharp, relevant question he could ask.\n"
+        "Output ONLY the words he will say — no intro, no labels, never address him, no placeholders.\n"
+        + style +
+        "The transcript is live speech recognition: silently read through misheard words.\n"
+        f"Speakers: Me = {me}, Other = people in the room, Them = people on the call.\n\n"
+        f"<recent_transcript>\n{tail.strip()}\n</recent_transcript>\n\n"
+        + latest_block(latest)
+    )

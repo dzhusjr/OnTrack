@@ -365,3 +365,28 @@ def test_real_english_after_ukrainian_still_switches_when_id_is_unsure():
     tx = Transcriber(asr, load_config(None))
     tx._last_lang[Channel.MIC] = "uk"
     assert tx.transcribe(utt(Channel.MIC, 0, 3.0)).lang == "en"
+
+
+def test_interview_mode_answers_from_general_knowledge_not_the_project(dirs, tmp_path):
+    project = tmp_path / "Work"
+    project.mkdir()
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("How would you deploy a machine learning model?"))],
+                            runner_script=[["I'd containerise it and serve it behind an API."]])
+    svc.cfg = replace(cfg, suggest_delay_s=0.0)
+    svc.digest.get = lambda p: "## cetl-search-api\nMon 17:10  Prioritize search results" if p else ""
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "set_session_options", "project_dir": str(project), "interview": True,
+                      "connectors": True})
+        await c.send({"type": "start_session", "name": "Interview"})
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.SYSTEM))
+        await c.expect(typ("suggestion_done"))
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+    p = svc.runner.prompts[0]
+    assert "How would you deploy a machine learning model?" in p and "general engineering knowledge" in p
+    assert "Never say he hasn't done it" in p and "<my_recent_work>" not in p and "cetl" not in p
+    assert svc.runner.project_dirs == [None]  # no project folder, no connectors
