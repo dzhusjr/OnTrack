@@ -157,7 +157,7 @@ def test_reply_button_answers_from_the_recent_talk(dirs):
 
     asyncio.run(run_with(svc, body))
     p = svc.runner.prompts[0]
-    assert "What is your experience with Kafka?" in p and "pressed Reply" in p and "Max 40 words" in p
+    assert "What is your experience with Kafka?" in p and "pressed Reply" in p and "max 50 words" in p and "never use placeholders" in p
     assert svc.runner.models == ["haiku"]
 
 

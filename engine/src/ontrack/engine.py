@@ -25,6 +25,9 @@ from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .assist import address_reason, build_reply_prompt, build_suggest_prompt, name_regex, transcript_tail
 from .qa import QaService, fast_stream
+from .style import SpeechStyle, conversation_language, style_block
+from .summarize import LANG_NAMES
+from .workdigest import WorkDigest
 from .recorder import AudioRecorder, recorded_seconds
 from .session import SessionWriter, paused_ranges, read_lines
 from .speaker import enroll, load_voiceprint
@@ -84,6 +87,8 @@ class EngineService:
         self.opts: dict = {"project_dir": None, "languages": None, "assist": True, "interview": False}
         self._names = name_regex(cfg.my_names)
         self._suggest_lock = threading.Lock()
+        self.style = SpeechStyle(cfg.app_support_dir / "my_speech.jsonl", cfg.sessions_dir)
+        self.digest = WorkDigest()
         self._last_auto_suggest = -1e9
         self.state = "idle"
         self.degraded = False
@@ -565,6 +570,7 @@ class EngineService:
                 self._send_now(self._error("bad_project", f"Project folder not found: {p}"))
                 p = None
             self.opts["project_dir"] = p
+            self.digest.warm(p)  # git summary ready before the first Reply
         if "languages" in msg:
             langs = tuple(l for l in (msg.get("languages") or ()) if isinstance(l, str) and l)
             self.opts["languages"] = langs or None
@@ -582,6 +588,11 @@ class EngineService:
     def _on_line(self, line: Line) -> None:
         """Pipeline thread: forward the line; notice when someone addresses you."""
         self.send(self._line_msg(line))
+        if self.cfg.collect_my_speech:
+            try:
+                self.style.add(line)
+            except OSError:
+                log.exception("could not save your line for the reply style")
         reason = address_reason(line, self._names, self.opts["interview"])
         if reason is None:
             return
@@ -615,11 +626,16 @@ class EngineService:
                     time.sleep(delay)  # let the speaker finish the question
                 said = trigger
                 tail = transcript_tail(session_dir, self.cfg.suggest_context_lines)
+                lang = conversation_language(read_lines(session_dir))
+                style = style_block(me, LANG_NAMES.get(lang or "", None),
+                                    self.style.samples(lang, self.cfg.style_samples))
+                work = self.digest.get(project)
+                name = project.name if project else None
                 if said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
                     said = "Reply"
-                    prompt = build_reply_prompt(tail, me, project.name if project else None)
+                    prompt = build_reply_prompt(tail, me, name, work=work, style=style)
                 else:
-                    prompt = build_suggest_prompt(tail, said, me, project.name if project else None)
+                    prompt = build_suggest_prompt(tail, said, me, name, work=work, style=style)
                 parts: list[str] = []
                 for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project):
                     parts.append(chunk)

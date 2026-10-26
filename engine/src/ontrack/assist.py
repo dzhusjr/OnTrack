@@ -34,37 +34,49 @@ def transcript_tail(session_dir: Path, lines: int) -> str:
     return "\n".join(body[-lines:])
 
 
-def build_suggest_prompt(tail: str, trigger: str, me: str, project: str | None) -> str:
-    project_hint = (f"You are inside Roman's project folder \"{project}\"; read files there only if the reply needs "
-                    "a concrete fact from it.\n") if project else ""
+_RULES = (
+    "Output ONLY the words {me} will say — no intro, no labels, never address {me}, never use placeholders "
+    "or brackets like [task]. Never invent facts.\n"
+    "If it is about his work or status (what he did, progress, plans, blockers), answer concretely from "
+    "<my_recent_work> (rephrase commit messages as natural speech; mention 1–3 main things). If nothing relevant "
+    "is known, give a short honest reply without made-up details.\n"
+    "The transcript is live speech recognition: silently read through misheard words.\n"
+)
+
+
+def _context(tail: str, me: str, project: str | None, work: str, style: str) -> str:
+    project_hint = (f"His project folder is \"{project}\" (you may read files there if a concrete fact is "
+                    "missing; prefer the summary below — it is faster).\n") if project else ""
+    work_block = f"<my_recent_work>\n{work.strip()}\n</my_recent_work>\n\n" if work.strip() else ""
     return (
-        f"You are {me}'s live meeting / interview helper. Someone just addressed {me}:\n"
-        f"\"{trigger.strip()}\"\n\n"
-        f"Write what {me} could say back, in first person, in the language of that line.\n"
-        "At most 2 short sentences, or 3 bullets of a few words each. No preamble, no explanations, "
-        "no comments about the transcript. If the line needs no reply, answer just: —\n"
-        + project_hint +
-        "The transcript is live speech recognition: silently read through misheard words.\n"
+        _RULES.format(me=me) + style + project_hint +
         f"Speakers: Me = {me}, Other = people in the room, Them = people on the call.\n\n"
+        + work_block +
         f"<recent_transcript>\n{tail.strip()}\n</recent_transcript>\n"
     )
 
 
-def build_reply_prompt(tail: str, me: str, project: str | None) -> str:
-    """The overlay's Reply button: answer the latest question, or say the one thing worth adding."""
-    project_hint = (f"You may read files in {me}'s project folder \"{project}\" if a concrete fact from it is "
-                    "needed.\n") if project else ""
+def build_suggest_prompt(tail: str, trigger: str, me: str, project: str | None, work: str = "",
+                         style: str = "") -> str:
+    """Someone said Roman's name / a trigger word (or asked a question in interview mode)."""
     return (
-        f"You are {me}'s live helper in a conversation. {me} pressed Reply: tell him what to say right now.\n"
+        f"You are {me}'s live meeting / interview helper. Someone just addressed {me}:\n"
+        f"\"{trigger.strip()}\"\n\n"
+        f"Write what {me} says back, in first person. At most 2 short sentences, or a short answer plus up to "
+        "2 short bullets. If the line needs no reply, answer just: —\n"
+        + _context(tail, me, project, work, style)
+    )
+
+
+def build_reply_prompt(tail: str, me: str, project: str | None, work: str = "", style: str = "") -> str:
+    """The overlay's Reply button: answer the latest question, or say the one thing worth adding."""
+    return (
+        f"You are {me}'s live helper in a conversation. {me} pressed Reply: write what he says right now.\n"
         "Look at the LAST few lines of the transcript.\n"
-        "- If someone asked a question there (to him or to the group): first line = the direct short answer, "
+        "- If someone asked a question there (to him or to the group): first the direct short answer, "
         "then at most 2 short bullets of detail, only if they really help.\n"
         "- If there was no question: one thing really worth saying now — a point, a suggestion, or a sharp question "
         f"{me} could ask.\n"
-        "Write it as he would say it (first person), in the conversation's language. Max 40 words total. "
-        "No preamble, no labels, no comments about the transcript.\n"
-        + project_hint +
-        "The transcript is live speech recognition: silently read through misheard words.\n"
-        f"Speakers: Me = {me}, Other = people in the room, Them = people on the call.\n\n"
-        f"<recent_transcript>\n{tail.strip()}\n</recent_transcript>\n"
+        "First person, max 50 words total.\n"
+        + _context(tail, me, project, work, style)
     )

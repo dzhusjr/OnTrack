@@ -35,6 +35,8 @@ class Config:
     suggest_context_lines: int = 40
     project_tools: tuple[str, ...] = ("Read", "Grep", "Glob")  # read-only tools inside the session's project
     project_max_turns: int = 6
+    collect_my_speech: bool = True  # keep your own lines (app support/my_speech.jsonl) so replies sound like you
+    style_samples: int = 25  # how many of your lines go into a reply prompt as style examples
     sessions_dir: Path = field(default_factory=lambda: Path("~/Desktop/Work/OnTrack/sessions").expanduser())
     app_support_dir: Path = field(
         default_factory=lambda: Path("~/Library/Application Support/OnTrack").expanduser()
