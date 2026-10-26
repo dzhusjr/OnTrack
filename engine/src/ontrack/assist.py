@@ -48,3 +48,23 @@ def build_suggest_prompt(tail: str, trigger: str, me: str, project: str | None) 
         f"Speakers: Me = {me}, Other = people in the room, Them = people on the call.\n\n"
         f"<recent_transcript>\n{tail.strip()}\n</recent_transcript>\n"
     )
+
+
+def build_reply_prompt(tail: str, me: str, project: str | None) -> str:
+    """The overlay's Reply button: answer the latest question, or say the one thing worth adding."""
+    project_hint = (f"You may read files in {me}'s project folder \"{project}\" if a concrete fact from it is "
+                    "needed.\n") if project else ""
+    return (
+        f"You are {me}'s live helper in a conversation. {me} pressed Reply: tell him what to say right now.\n"
+        "Look at the LAST few lines of the transcript.\n"
+        "- If someone asked a question there (to him or to the group): first line = the direct short answer, "
+        "then at most 2 short bullets of detail, only if they really help.\n"
+        "- If there was no question: one thing really worth saying now — a point, a suggestion, or a sharp question "
+        f"{me} could ask.\n"
+        "Write it as he would say it (first person), in the conversation's language. Max 40 words total. "
+        "No preamble, no labels, no comments about the transcript.\n"
+        + project_hint +
+        "The transcript is live speech recognition: silently read through misheard words.\n"
+        f"Speakers: Me = {me}, Other = people in the room, Them = people on the call.\n\n"
+        f"<recent_transcript>\n{tail.strip()}\n</recent_transcript>\n"
+    )

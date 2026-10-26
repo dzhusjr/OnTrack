@@ -165,6 +165,10 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.question = q
     case let .submitQuestion(id):
         let q = s.question.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.lowercased() == "reply" || q.lowercased() == "відповідь" {  // same as the Reply button
+            s.question = ""
+            return reduce(&s, .requestSuggestion(id: id))
+        }
         guard !q.isEmpty, !s.asking else { return [] }
         if !s.lastQuestion.isEmpty, !s.answer.isEmpty {  // keep the thread: the new question may be a follow-up
             s.qaHistory.append(QAExchange(question: s.lastQuestion, answer: s.answer))

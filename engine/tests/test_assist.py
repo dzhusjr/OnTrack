@@ -139,7 +139,7 @@ def test_options_pass_project_folder_to_claude_and_lock_language(dirs, tmp_path)
     assert svc.runner.models == ["haiku"]  # live answers use the fastest model
 
 
-def test_manual_suggest_uses_last_thing_someone_else_said(dirs):
+def test_reply_button_answers_from_the_recent_talk(dirs):
     svc, cfg = make_service(dirs, [({"en": 1}, tr("What is your experience with Kafka?"))], runner_script=[["Three years."]])
 
     async def body():
@@ -156,7 +156,9 @@ def test_manual_suggest_uses_last_thing_someone_else_said(dirs):
         await c.close()
 
     asyncio.run(run_with(svc, body))
-    assert "What is your experience with Kafka?" in svc.runner.prompts[0]
+    p = svc.runner.prompts[0]
+    assert "What is your experience with Kafka?" in p and "pressed Reply" in p and "Max 40 words" in p
+    assert svc.runner.models == ["haiku"]
 
 
 # ---- claude runner in a project ------------------------------------------------------------------------

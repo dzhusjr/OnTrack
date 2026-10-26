@@ -23,7 +23,7 @@ from .control import NdjsonDecoder, ProtocolError, encode, validate
 from .finalize import FinalizeDeps, finalize, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
-from .assist import address_reason, build_suggest_prompt, name_regex, transcript_tail
+from .assist import address_reason, build_reply_prompt, build_suggest_prompt, name_regex, transcript_tail
 from .qa import QaService, fast_stream
 from .recorder import AudioRecorder, recorded_seconds
 from .session import SessionWriter, paused_ranges, read_lines
@@ -614,11 +614,12 @@ class EngineService:
                 if delay > 0:
                     time.sleep(delay)  # let the speaker finish the question
                 said = trigger
-                if said is None:
-                    others = [l for l in read_lines(session_dir) if l.speaker not in (Speaker.ME, Speaker.NOTE)]
-                    said = others[-1].text if others else "(nothing yet)"
-                prompt = build_suggest_prompt(transcript_tail(session_dir, self.cfg.suggest_context_lines), said, me,
-                                              project.name if project else None)
+                tail = transcript_tail(session_dir, self.cfg.suggest_context_lines)
+                if said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
+                    said = "Reply"
+                    prompt = build_reply_prompt(tail, me, project.name if project else None)
+                else:
+                    prompt = build_suggest_prompt(tail, said, me, project.name if project else None)
                 parts: list[str] = []
                 for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project):
                     parts.append(chunk)

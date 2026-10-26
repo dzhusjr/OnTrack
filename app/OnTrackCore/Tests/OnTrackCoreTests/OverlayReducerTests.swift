@@ -409,3 +409,15 @@ final class FollowUpTests: XCTestCase {
         XCTAssertTrue(s.qaHistory.isEmpty)  // new session, new thread
     }
 }
+
+final class ReplyWordTests: XCTestCase {
+    func testTypingReplyActsLikeTheButton() {
+        var s = OverlayState()
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+        reduce(&s, .questionChanged(" Reply "))
+        XCTAssertEqual(reduce(&s, .submitQuestion(id: "r1")), [.suggest(id: "r1")])
+        XCTAssertEqual(s.question, "")
+        XCTAssertEqual(s.suggestion, Suggestion(id: "r1"))
+        XCTAssertFalse(s.asking)
+    }
+}

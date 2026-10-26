@@ -96,6 +96,14 @@ struct OverlayView: View {
     private var statusBadge: some View {
         VStack(alignment: .trailing, spacing: 4) {
             HStack(spacing: 5) {
+                if s.recording {
+                    Button("Reply") { store.send(.requestSuggestion(id: UUID().uuidString)) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.mini)
+                        .tint(.yellow.opacity(0.85))
+                        .disabled(s.suggestion != nil && s.suggestion?.done == false)
+                        .help("Answer the latest question — or what's worth saying now (⌥⇧A)")
+                }
                 Button {
                     store.toggleLive()
                 } label: {
