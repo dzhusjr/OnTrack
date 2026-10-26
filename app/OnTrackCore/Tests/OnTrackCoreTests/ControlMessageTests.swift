@@ -34,7 +34,7 @@ final class ControlMessageTests: XCTestCase {
             "set_paused": .setPaused(true),
             "set_session_options": .setSessionOptions(SessionOptions(projectDir: "/Users/dzhus/PycharmProjects/cetl",
                                                                      languages: ["uk"], assist: true, interview: false,
-                                                                     names: ["Roman", "Роман"])),
+                                                                     names: ["Roman", "Роман"], connectors: false)),
             "suggest": .suggest(id: "s1"),
         ]
         var seen = 0

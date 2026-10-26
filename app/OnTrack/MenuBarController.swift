@@ -43,6 +43,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var editTriggerWords: () -> Void
         var saveNotesToProject: () -> Bool
         var toggleSaveNotesToProject: () -> Void
+        var connectors: () -> Bool
+        var toggleConnectors: () -> Void
     }
 
     static let languages: [(code: String, title: String)] = [
@@ -206,6 +208,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         interview.target = self
         interview.state = s.interview() ? .on : .off
         menu.addItem(interview)
+        let conn = NSMenuItem(title: "Use Connectors (Jira, Mail…) — Slower", action: #selector(toggleConnectors),
+                              keyEquivalent: "")
+        conn.target = self
+        conn.state = s.connectors() ? .on : .off
+        conn.toolTip = "Answers and replies may look things up with the connectors set up in Claude Code "
+            + "(claude mcp list), read-only. Adds a few seconds."
+        menu.addItem(conn)
         add(menu, "Names & Trigger Words…", #selector(editTriggerWords))
         add(menu, "Suggest a Reply Now", #selector(suggestNow), key: "a", mods: [.option, .shift], enabled: state.recording)
         menu.addItem(.separator())
@@ -218,6 +227,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func toggleInterview() { actions.session.toggleInterview() }
     @objc private func suggestNow() { actions.session.suggestNow() }
     @objc private func editTriggerWords() { actions.session.editTriggerWords() }
+    @objc private func toggleConnectors() { actions.session.toggleConnectors() }
     @objc private func toggleSaveToProject() { actions.session.toggleSaveNotesToProject() }
 
     private func add(_ menu: NSMenu, _ title: String, _ sel: Selector, key: String = "",

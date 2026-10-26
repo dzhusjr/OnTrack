@@ -84,7 +84,8 @@ class EngineService:
         self.qa = QaService(runner, cfg)
         self.runner = runner
         # per-session choices from the app (menu): project folder for Claude, language lock, reply helper
-        self.opts: dict = {"project_dir": None, "languages": None, "assist": True, "interview": False}
+        self.opts: dict = {"project_dir": None, "languages": None, "assist": True, "interview": False,
+                           "connectors": False}
         self._names = name_regex(cfg.my_names)
         self._suggest_lock = threading.Lock()
         self.style = SpeechStyle(cfg.app_support_dir / "my_speech.jsonl", cfg.sessions_dir)
@@ -579,11 +580,16 @@ class EngineService:
         if "names" in msg:
             words = tuple(str(w).strip() for w in (msg.get("names") or ()) if str(w).strip())
             self._names = name_regex(words or tuple(self.cfg.my_names))
-        for key in ("assist", "interview"):
+        if msg.get("connectors") and not self.opts["connectors"]:
+            from .llm import mcp_servers
+
+            self._pool.submit(mcp_servers, self.cfg)  # discover Claude Code's connectors before the first answer
+        for key in ("assist", "interview", "connectors"):
             if key in msg:
                 self.opts[key] = bool(msg[key])
-        log.info("session options: project=%s languages=%s assist=%s interview=%s", self.opts["project_dir"],
-                 self.opts["languages"], self.opts["assist"], self.opts["interview"])
+        log.info("session options: project=%s languages=%s assist=%s interview=%s connectors=%s",
+                 self.opts["project_dir"], self.opts["languages"], self.opts["assist"], self.opts["interview"],
+                 self.opts["connectors"])
 
     def _on_line(self, line: Line) -> None:
         """Pipeline thread: forward the line; notice when someone addresses you."""
@@ -630,14 +636,15 @@ class EngineService:
                 style = style_block(me, LANG_NAMES.get(lang or "", None),
                                     self.style.samples(lang, self.cfg.style_samples))
                 work = self.digest.get(project)
+                connectors = bool(self.opts["connectors"])
                 name = project.name if project else None
                 if said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
                     said = "Reply"
-                    prompt = build_reply_prompt(tail, me, name, work=work, style=style)
+                    prompt = build_reply_prompt(tail, me, name, work=work, style=style, connectors=connectors)
                 else:
-                    prompt = build_suggest_prompt(tail, said, me, name, work=work, style=style)
+                    prompt = build_suggest_prompt(tail, said, me, name, work=work, style=style, connectors=connectors)
                 parts: list[str] = []
-                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project):
+                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project, connectors):
                     parts.append(chunk)
                     self.send({"type": "suggestion_delta", "id": sid, "text": chunk})
                 reply = "".join(parts).strip()
@@ -679,7 +686,8 @@ class EngineService:
 
         def job() -> None:
             try:
-                for chunk in self.qa.ask(session_dir, question, project_dir=self.opts["project_dir"]):
+                for chunk in self.qa.ask(session_dir, question, project_dir=self.opts["project_dir"],
+                                         connectors=bool(self.opts["connectors"])):
                     self.send({"type": "answer_delta", "id": qid, "text": chunk})
             except LlmError as e:
                 self.send(self._error(e.code, e.message))

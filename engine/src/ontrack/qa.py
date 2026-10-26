@@ -25,7 +25,8 @@ def recent_exchanges(qa_md: str, n: int = 4) -> list[tuple[str, str]]:
 
 
 def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = "Roman",
-                    project: str | None = None, history: list[tuple[str, str]] | None = None) -> str:
+                    project: str | None = None, history: list[tuple[str, str]] | None = None,
+                    connectors: bool = False) -> str:
     earlier = "".join(f"Q: {q}\nA: {a}\n\n" for q, a in (history or []))
     earlier_block = (f"<earlier_questions>\n{earlier.strip()}\n</earlier_questions>\n"
                      "The new question may be a follow-up to these: resolve \"it\", \"that\", \"and X?\" from them.\n\n"
@@ -39,7 +40,7 @@ def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = 
         "The transcript is live speech recognition: silently read through misheard words and duplicates; never "
         "comment on transcript quality. Only if the specific answer is not there, say so in a few words.\n"
         "Add a session time like [00:12:03] only when it helps find the moment.\n"
-        + project_hint +
+        + project_hint + (CONNECTOR_HINT if connectors else "") +
         f"Speakers: Me = {me}, Other/Speaker X = people in the room, Them = people on the call.\n"
         "Answer in the same language as the question.\n\n"
         f"<transcript>\n{transcript_md.strip()}\n</transcript>\n\n"
@@ -49,11 +50,18 @@ def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = 
     )
 
 
-def fast_stream(runner, cfg: Config, prompt: str, timeout_s: float, project_dir: Path | None = None):
-    """Live answers use the fastest model; the project folder is passed only when set."""
+CONNECTOR_HINT = ("You can also look things up with his connected tools (e.g. Jira, calendar, mail) when the answer "
+                  "depends on them — read only: never create, change, send or delete anything.\n")
+
+
+def fast_stream(runner, cfg: Config, prompt: str, timeout_s: float, project_dir: Path | None = None,
+                connectors: bool = False):
+    """Live answers use the fastest model; the project folder / connectors are passed only when used."""
     kwargs = {"model": cfg.fast_llm_model} if cfg.fast_llm_model else {}
     if project_dir:
         kwargs["project_dir"] = project_dir
+    if connectors:
+        kwargs["connectors"] = True
     return runner.stream(prompt, timeout_s, **kwargs)
 
 
@@ -64,7 +72,7 @@ class QaService:
         self._lock = threading.Lock()  # one question in flight; others wait their turn
 
     def ask(self, session_dir: Path, question: str, now: datetime | None = None,
-            project_dir: Path | None = None) -> Iterator[str]:
+            project_dir: Path | None = None, connectors: bool = False) -> Iterator[str]:
         session_dir = Path(session_dir)
         now = now or datetime.now()
         me = self.cfg.my_names[0] if self.cfg.my_names else "Roman"
@@ -72,10 +80,10 @@ class QaService:
             notes = "\n\n".join(t for t in (_read(session_dir / "summary.md"), _read(session_dir / "notes.md")) if t.strip())
             prompt = build_qa_prompt(_read(session_dir / "transcript.md"), notes, question,
                                      me=me, project=Path(project_dir).name if project_dir else None,
-                                     history=recent_exchanges(_read(session_dir / "qa.md")))
+                                     history=recent_exchanges(_read(session_dir / "qa.md")), connectors=connectors)
             parts: list[str] = []
             try:
-                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project_dir):
+                for chunk in fast_stream(self.runner, self.cfg, prompt, self.cfg.qa_timeout_s, project_dir, connectors):
                     parts.append(chunk)
                     yield chunk
             except LlmError as e:

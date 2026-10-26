@@ -114,6 +114,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.settings.saveNotesToProject.toggle()
                     self.store.showToast(self.settings.saveNotesToProject ? "Notes will also be saved into the project folder"
                                                                           : "Notes no longer saved into the project folder")
+                },
+                connectors: { [weak self] in self?.settings.useConnectors ?? false },
+                toggleConnectors: { [weak self] in
+                    guard let self else { return }
+                    self.settings.useConnectors.toggle()
+                    self.sendSessionOptions()
+                    self.store.showToast(self.settings.useConnectors
+                        ? "Connectors on — answers can check Jira etc. (a few seconds slower)" : "Connectors off — fastest answers")
                 }
             ),
             showNotes: { [weak self] in self?.notesWindow.show() }

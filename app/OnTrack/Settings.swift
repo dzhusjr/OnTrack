@@ -102,9 +102,15 @@ struct Settings {
         nonmutating set { defaults.set(newValue, forKey: "saveNotesToProject") }
     }
 
+    /// Let answers use the connectors set up in Claude Code (`claude mcp list`), e.g. Jira. Slower.
+    var useConnectors: Bool {
+        get { defaults.object(forKey: "useConnectors") as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: "useConnectors") }
+    }
+
     var sessionOptions: SessionOptions {
         SessionOptions(projectDir: projectDir, languages: sessionLanguage == "auto" ? [] : [sessionLanguage],
-                       assist: suggestReplies, interview: interviewMode, names: triggerWords)
+                       assist: suggestReplies, interview: interviewMode, names: triggerWords, connectors: useConnectors)
     }
 
     var echoCancellation: Bool {

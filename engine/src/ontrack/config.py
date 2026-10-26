@@ -34,6 +34,8 @@ class Config:
     suggest_min_gap_s: float = 15.0  # between automatic suggestions for plain questions (names always trigger)
     suggest_context_lines: int = 40
     project_tools: tuple[str, ...] = ("Read", "Grep", "Glob")  # read-only tools inside the session's project
+    project_commands: tuple[str, ...] = ("git log", "git show", "git diff", "git status", "git branch", "ls")  # read-only shell
+    connector_max_turns: int = 10  # with connectors (Jira, Gmail, …) Claude may need a few lookups
     project_max_turns: int = 6
     collect_my_speech: bool = True  # keep your own lines (app support/my_speech.jsonl) so replies sound like you
     style_samples: int = 25  # how many of your lines go into a reply prompt as style examples

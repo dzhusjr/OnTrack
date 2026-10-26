@@ -150,9 +150,11 @@ public struct SessionOptions: Equatable, Sendable {
     public var assist: Bool  // auto-draft a reply when someone says your name / a trigger word
     public var interview: Bool  // … and for every question someone asks
     public var names: [String]  // your name, nicknames and any trigger words; empty = engine default
+    public var connectors: Bool  // let Claude use Claude Code's connectors (Jira, mail, …): richer but slower
 
     public init(projectDir: String? = nil, languages: [String] = [], assist: Bool = true, interview: Bool = false,
-                names: [String] = []) {
+                names: [String] = [], connectors: Bool = false) {
+        self.connectors = connectors
         self.projectDir = projectDir
         self.languages = languages
         self.assist = assist
@@ -201,7 +203,7 @@ public enum Outbound: Equatable, Sendable {
         case let .setPaused(on): return ["type": "set_paused", "paused": on]
         case let .setSessionOptions(o):
             return ["type": "set_session_options", "project_dir": o.projectDir ?? NSNull(), "languages": o.languages,
-                    "assist": o.assist, "interview": o.interview, "names": o.names]
+                    "assist": o.assist, "interview": o.interview, "names": o.names, "connectors": o.connectors]
         case let .suggest(id): return ["type": "suggest", "id": id]
         case let .askAbout(id, q, sid): return ["type": "ask", "id": id, "question": q, "session_id": sid]
         }

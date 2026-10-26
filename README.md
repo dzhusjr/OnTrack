@@ -131,6 +131,7 @@ If you change a model in the engine config, run `scripts/dev.sh models` once to 
 | Reply button | yellow **Reply** on the overlay (or ⌥⇧A, or type `reply` in the question box): if someone just asked something, you get the short answer first plus a bit of detail; otherwise the one thing worth saying or asking now. Max ~40 words, fastest model |
 | Interview / meeting helper | menu → Interview Mode: a short suggested reply for every question someone asks you. ⌥⇧A drafts one for the latest question anytime |
 | Work inside a project | menu → Project → Choose Folder… (e.g. your CETL repo). Questions and suggested replies then use that folder (read-only) and its CLAUDE.md as context. Project → Also Save Notes Into This Folder copies each saved session to `<project>/OnTrack Notes` |
+| Connectors | menu → Use Connectors (Jira, Mail…) — Slower: answers and replies may look things up with the connectors set up in **Claude Code** (`claude mcp list`; add one with `claude mcp add`), read-only. Off = fastest. In a project folder Claude can also run read-only `git log/show/diff/status/branch` and `ls` |
 | Speed | live questions and suggested replies use the fastest Claude model (`fast_llm_model = "haiku"`); the end-of-session summary uses `llm_model` (Sonnet) |
 | Whole conversation in one language | menu → Language → Українська / English / Nederlands. Most accurate; stops short phrases being "translated" into English |
 | End of session | overlay card: **Save summary + transcript** (Enter) · Transcript only · Discard (click twice) |

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import tempfile
@@ -47,6 +48,44 @@ def _classify(text: str) -> str:
     return "llm_failed"
 
 
+_MCP_CACHE: dict[str, tuple[float, list[str]]] = {}
+_MCP_LINE = re.compile(r"^([^:\s][^:]*?):\s+\S")
+
+
+def mcp_tool_prefix(name: str) -> str:
+    """Claude Code names MCP tools mcp__<server>__<tool>, with the server name sanitised."""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name.strip())
+
+
+def parse_mcp_list(output: str) -> list[str]:
+    """Server names from `claude mcp list` ("name: <url or command> - ✓ Connected"); failed ones skipped."""
+    names = []
+    for line in output.splitlines():
+        m = _MCP_LINE.match(line.strip())
+        if not m or "fail" in line.lower() or line.lower().startswith(("checking", "no mcp")):
+            continue
+        names.append(mcp_tool_prefix(m.group(1)))
+    return list(dict.fromkeys(names))
+
+
+def mcp_servers(cfg: Config, ttl_s: float = 600.0) -> list[str]:
+    """Connectors configured in Claude Code on this Mac (cached; `claude mcp list` health-checks each one)."""
+    key = cfg.claude_path or "claude"
+    hit = _MCP_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < ttl_s:
+        return hit[1]
+    exe = find_claude(cfg)
+    names: list[str] = []
+    if exe is not None:
+        try:
+            r = subprocess.run([str(exe), "mcp", "list"], capture_output=True, text=True, timeout=30)
+            names = parse_mcp_list(r.stdout)
+        except (OSError, subprocess.SubprocessError):
+            names = []
+    _MCP_CACHE[key] = (time.monotonic(), names)
+    return names
+
+
 class ClaudeRunner:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -57,21 +96,43 @@ class ClaudeRunner:
             "--model", model or self.cfg.llm_model, *extra,
         ]
 
-    def project_args(self) -> tuple[str, ...]:
-        """Read-only tools inside the project folder; permission prompts can't be answered in -p mode."""
+    def project_args(self, connectors: bool = False) -> tuple[str, ...]:
+        """Read-only file tools + read-only git/ls inside the project folder. Anything not allowed is refused:
+        permission prompts can't be answered in -p mode."""
         tools = tuple(self.cfg.project_tools)
-        return ("--strict-mcp-config", "--tools", ",".join(tools), "--allowedTools", *tools,
-                "--max-turns", str(self.cfg.project_max_turns))
+        commands = tuple(f"Bash({c}:*)" for c in self.cfg.project_commands)
+        builtin = tools + (("Bash",) if commands else ())
+        allow = (*tools, *commands, *self._connector_allow(connectors))
+        return (*self._mcp_args(connectors), "--tools", ",".join(builtin), "--allowedTools", *allow, "--max-turns",
+                str(self.cfg.connector_max_turns if connectors else self.cfg.project_max_turns))
+
+    def connector_args(self) -> tuple[str, ...]:
+        """No project folder, connectors on: no built-in tools, only the user's Claude Code MCP servers."""
+        allow = self._connector_allow(True)
+        return ("--tools", "", *(("--allowedTools", *allow) if allow else ()),
+                "--max-turns", str(self.cfg.connector_max_turns))
+
+    def _mcp_args(self, connectors: bool) -> tuple[str, ...]:
+        return () if connectors else ("--strict-mcp-config",)  # strict = ignore every configured MCP server
+
+    def _connector_allow(self, connectors: bool) -> tuple[str, ...]:
+        """Permission rules 'mcp__<server>' for every connector Claude Code has (they can't ask in -p mode)."""
+        return tuple(f"mcp__{s}" for s in mcp_servers(self.cfg)) if connectors else ()
 
     def stream(self, prompt: str, timeout_s: float, project_dir: Path | None = None,
-               model: str | None = None) -> Iterator[str]:
+               model: str | None = None, connectors: bool = False) -> Iterator[str]:
         project = Path(project_dir).expanduser() if project_dir else None
         if project is not None and not project.is_dir():
             project = None
-        extra = self.project_args() if project is not None else tuple(self.cfg.llm_extra_args)
+        if project is not None:
+            extra = self.project_args(connectors)
+        elif connectors:
+            extra = self.connector_args()
+        else:
+            extra = tuple(self.cfg.llm_extra_args)
         try:
             yield from self._stream(prompt, timeout_s, extra, project, model)
-        except LlmError as e:
+        except LlmError as e:  # noqa: B904
             if e.code != "llm_unsupported" or not extra:
                 raise
             # older Claude Code without these flags: retry plain

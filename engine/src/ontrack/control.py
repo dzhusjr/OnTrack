@@ -18,7 +18,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "set_config": ("config",),
     "set_live": ("enabled",),  # live transcription on/off; audio keeps recording either way
     "set_paused": ("paused",),  # pause/resume recording; nothing is captured while paused
-    "set_session_options": (),  # any of: project_dir, languages, assist, interview, names (trigger words)
+    "set_session_options": (),  # any of: project_dir, languages, assist, interview, names, connectors
     "suggest": ("id",),  # draft a reply to the latest thing someone said
     # engine -> app
     "pong": ("state",),

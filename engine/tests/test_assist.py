@@ -178,7 +178,9 @@ def test_runner_uses_project_cwd_and_read_only_tools(tmp_path, monkeypatch):
     log = json.loads((tmp_path / "log.json").read_text())
     assert Path(log["cwd"]).resolve() == project.resolve() and project.exists()
     argv = log["argv"]
-    assert argv[argv.index("--tools") + 1] == "Read,Grep,Glob" and "--allowedTools" in argv and "Bash" not in argv
+    assert argv[argv.index("--tools") + 1] == "Read,Grep,Glob,Bash" and "--strict-mcp-config" in argv
+    allowed = argv[argv.index("--allowedTools") + 1: argv.index("--max-turns")]
+    assert "Bash(git log:*)" in allowed and "Read" in allowed and "Bash" not in allowed  # only read-only commands
 
 
 def test_trigger_words_from_the_app_replace_the_default_names(dirs):
@@ -229,3 +231,57 @@ def test_ask_about_a_saved_session_uses_its_notes_folder(dirs):
     asyncio.run(run_with(svc, body))
     assert "Deploy on Friday." in svc.runner.prompts[0] and "Deploy Friday." in svc.runner.prompts[0]
     assert "when is the deploy?" in (d / "qa.md").read_text(encoding="utf-8")
+
+
+def test_parse_claude_mcp_list():
+    from ontrack.llm import parse_mcp_list
+
+    out = """Checking MCP server health...
+
+atlassian: https://mcp.atlassian.com/v1/sse (SSE) - ✓ Connected
+claude.ai Gmail: https://gmail.mcp.claude.com/mcp - ✓ Connected
+broken: npx something - ✗ Failed to connect
+"""
+    assert parse_mcp_list(out) == ["atlassian", "claude_ai_Gmail"]
+
+
+def test_connectors_enable_mcp_and_allow_each_server(tmp_path, monkeypatch):
+    import ontrack.llm as llm
+
+    monkeypatch.setattr(llm, "mcp_servers", lambda cfg, ttl_s=600.0: ["atlassian"])
+    r = ClaudeRunner(load_config(None))
+    on = r.project_args(connectors=True)
+    assert "--strict-mcp-config" not in on and "mcp__atlassian" in on and on[on.index("--max-turns") + 1] == "10"
+    assert "--strict-mcp-config" in r.project_args(connectors=False)
+    bare = r.connector_args()
+    assert bare[:2] == ("--tools", "") and "mcp__atlassian" in bare
+
+
+def test_connectors_option_reaches_claude_with_a_read_only_hint(dirs):
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("Status of 1549?"))], runner_script=[["In review."]])
+    calls = []
+    real = svc.runner.stream
+
+    def spy(prompt, timeout_s, **kw):
+        calls.append(kw)
+        return real(prompt, timeout_s, **{k: v for k, v in kw.items() if k != "connectors"})
+
+    svc.runner.stream = spy
+    svc.qa.runner = svc.runner
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "set_session_options", "connectors": True, "assist": False})
+        await c.send({"type": "start_session", "name": "S"})
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.SYSTEM))
+        await c.expect(typ("line"))
+        await c.send({"type": "suggest", "id": "r1"})
+        await c.expect(typ("suggestion_done"))
+        await c.close()
+
+    import ontrack.llm as llm
+    llm._MCP_CACHE["claude"] = (1e18, [])  # don't run a real `claude mcp list` in tests
+    asyncio.run(run_with(svc, body))
+    assert calls and calls[-1].get("connectors") is True
+    assert "never create, change, send or delete" in svc.runner.prompts[-1]
