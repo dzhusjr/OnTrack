@@ -13,6 +13,7 @@ from .config import Config
 from .llm import LlmError
 from .postprocess import postprocess
 from .recorder import delete_audio
+from .naming import is_auto_named, rename_notes, summary_title
 from .summarize import summarize
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ class FinalizeDeps:
     runner: object
     cfg: Config
     vad_factory: object | None = None  # for transcribing stretches where live transcription was paused
+    projects: tuple[str, ...] = ()  # project names under the session's work folder (for the session title)
 
 
 def _copy_if(src: Path, dst: Path) -> None:
@@ -65,7 +67,10 @@ def finalize(
     if action == "save_all":
         progress("summarizing", 0.7)
         try:
-            summary = summarize(deps.runner, session_dir, deps.cfg)
+            summary = summarize(deps.runner, session_dir, deps.cfg, deps.projects)
+            title = summary_title(summary)
+            if title and is_auto_named(session_dir):  # quick-started session: name it "Daily 2026-10-27 — Search API"
+                notes = rename_notes(notes, title)
             (notes / "summary.md").write_text(summary, encoding="utf-8")
             (notes / "summary_pending").unlink(missing_ok=True)
         except LlmError as e:

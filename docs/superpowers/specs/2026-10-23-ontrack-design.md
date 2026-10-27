@@ -2,17 +2,17 @@
 
 - **Date:** 2026-10-23
 - **Status:** Draft — awaiting review
-- **Owner:** Roman
+- **Owner:** the user
 - **Process:** Spec-driven (Superpowers): spec → implementation plan → TDD execution
 
 ## 1. Purpose
 
-A Granola-style, **completely free**, **realtime**, **reliable** transcriber for macOS that works for **online calls and in-person conversations/lectures**. While a session runs, Roman sees the last few lines of the live transcript in a minimal floating overlay and can ask follow-up questions in that overlay. When the session ends, OnTrack offers to save a summary and the raw transcript to his notes, which are synced to the "OnTrack" Claude Project.
+A Granola-style, **completely free**, **realtime**, **reliable** transcriber for macOS that works for **online calls and in-person conversations/lectures**. While a session runs, the user sees the last few lines of the live transcript in a minimal floating overlay and can ask follow-up questions in that overlay. When the session ends, OnTrack offers to save a summary and the raw transcript to his notes, which are synced to the "OnTrack" Claude Project.
 
 ### Success criteria
 
 1. **Latency:** p90 ≤ 3 s from the end of an utterance to its line appearing in the overlay.
-2. **Cost:** €0 recurring. No paid APIs. Uses local models plus Roman's existing Claude subscription (via Claude Code CLI).
+2. **Cost:** €0 recurring. No paid APIs. Uses local models plus the user's existing Claude subscription (via Claude Code CLI).
 3. **Reliability:** a 3-hour session completes without data loss; if the engine crashes, the app restarts it within 5 s, continues the same session, and every line written before the crash is preserved.
 4. **Languages:** English, Russian, Ukrainian, including switching mid-session (detected per utterance).
 5. **Speakers:** live `Me` / `Other` (in person) and `Me` / `Them` (calls); after the session, `Other` is split into `Speaker A/B/C`. Target ≥ 90 % correct Me-vs-Other on a test conversation.
@@ -30,10 +30,10 @@ Auto-start (call or calendar detection), live A/B/C diarization, in-app local LL
 | D2 | Audio sources: Mac mic + system audio | In-person and online. |
 | D3 | System audio via **ScreenCaptureKit**, mic via **AVAudioEngine** with Apple voice processing (AEC) enabled | No BlackHole/virtual devices; volume keys keep working; AEC reduces speaker echo into the mic. |
 | D4 | Speaker labels: channel-based (`Them` = system audio) + **voiceprint** match on mic (`Me` vs `Other`); offline pyannote diarization for A/B/C | Speaker verification against one enrolled voice is reliable live; full clustering is only reliable on the whole recording. |
-| D5 | Architecture A: **SwiftUI app** (capture, menu bar, hotkey, overlay) + **Python engine** (VAD, ASR, speaker ID, storage, Q&A, post-processing) | Python keeps most logic testable and in Roman's main stack; Swift is used only where macOS APIs require it. |
+| D5 | Architecture A: **SwiftUI app** (capture, menu bar, hotkey, overlay) + **Python engine** (VAD, ASR, speaker ID, storage, Q&A, post-processing) | Python keeps most logic testable and in the user's main stack; Swift is used only where macOS APIs require it. |
 | D6 | LLM = **Claude via Claude Code CLI** (`claude -p`), headless, no tools | Uses existing subscription → free; best quality incl. Russian. |
 | D7 | Sessions start/stop **manually** (menu bar or global hotkey) | Predictable; nothing is recorded by accident. |
-| D8 | On stop, overlay prompts: save summary + transcript / transcript only / discard | Requested by Roman. |
+| D8 | On stop, overlay prompts: save summary + transcript / transcript only / discard | Requested by the user. |
 | D9 | Raw audio is temporary: deleted after post-processing (or on discard) | Privacy, disk usage. |
 
 ## 3. Architecture
@@ -109,10 +109,10 @@ Each unit has one job and a small interface; heavy dependencies sit behind proto
 | `echo` | `filter(line, recent_them) -> bool` | Drops mic lines that duplicate a `THEM` line overlapping in time (token-set similarity ≥ 0.8) — safety net for laptop-speaker calls when AEC is insufficient. |
 | `session` | `SessionWriter.start(name)`, `append(line)`, `close()` | Writes `transcript.jsonl` (source of truth, one JSON line per utterance, flushed + fsync) and regenerates `transcript.md` incrementally. Resumable: on restart with an existing id, reopens and continues. Raw audio per channel → `~/Library/Application Support/OnTrack/audio/<id>/{mic,system}.flac` (chunked, 60 s files). |
 | `control` | NDJSON server | Message schema in §5. |
-| `qa` | `ask(question, session) -> AsyncIterator[str]` | Builds prompt (system instructions + full transcript so far + Roman's `notes.md` + question), runs `claude -p --output-format stream-json`, no tools, timeout 60 s, one in-flight question (others queued). Answers appended to `session/qa.md`. |
+| `qa` | `ask(question, session) -> AsyncIterator[str]` | Builds prompt (system instructions + full transcript so far + the user's `notes.md` + question), runs `claude -p --output-format stream-json`, no tools, timeout 60 s, one in-flight question (others queued). Answers appended to `session/qa.md`. |
 | `postprocess` | `run(session_id) -> FinalTranscript` | pyannote `speaker-diarization-3.1` on mic audio; maps clusters → `Me` (best voiceprint match) / `Speaker A/B/C`; re-transcribes with large-v3-turbo full precision at segment boundaries; writes `transcript.final.md`. |
 | `summarize` | `summarize(final_transcript, notes) -> str` | `claude -p` with a summary template (TL;DR, key points, decisions, action items with owner, open questions, glossary of terms). Output in the session's dominant language unless overridden. |
-| `enroll` | `ontrack enroll` | Records 30 s of Roman reading a prompt (mic only), computes mean embedding over 3+ windows, saves `voiceprint.npy`; prints self-similarity sanity score. |
+| `enroll` | `ontrack enroll` | Records 30 s of the user reading a prompt (mic only), computes mean embedding over 3+ windows, saves `voiceprint.npy`; prints self-similarity sanity score. |
 | `config` | TOML at `~/Library/Application Support/OnTrack/config.toml` | Paths, hotkeys, τ, model ids, overlay line count, LLM model. |
 
 ## 5. IPC protocol
@@ -147,7 +147,7 @@ Engine → app: `pong{state}`, `status{state: idle|recording|stopping|postproces
    - `save_all`: postprocess → summarize → write `notes/<id>/{summary.md, transcript.md, qa.md}` → delete audio → mark `notes/<id>/.pending_sync`.
    - `transcript_only`: postprocess → `notes/<id>/transcript.md` → delete audio → `.pending_sync`.
    - `discard`: delete audio and the session folder (after confirmation).
-6. **Claude Project sync:** a Cowork scheduled task (daily, plus on demand when Roman asks in chat) reads `notes/*/.pending_sync`, writes each note into the OnTrack Claude Project with `project_write`, then removes the marker. (The Mac app cannot write to claude.ai Projects directly; this keeps it free and reliable.)
+6. **Claude Project sync:** a Cowork scheduled task (daily, plus on demand when the user asks in chat) reads `notes/*/.pending_sync`, writes each note into the OnTrack Claude Project with `project_write`, then removes the marker. (The Mac app cannot write to claude.ai Projects directly; this keeps it free and reliable.)
 7. **Live follow-ups in Cowork:** Claude can also read `sessions/<id>/transcript.md` from the connected folder at any time.
 
 ## 8. Error handling & reliability
@@ -167,10 +167,10 @@ Logs: `~/Library/Application Support/OnTrack/logs/{app,engine}.log`, rotating, 1
 
 ## 9. Privacy & permissions
 
-- Everything runs locally; only transcript text + notes + question are sent to Claude (Roman's own account) for Q&A/summary.
+- Everything runs locally; only transcript text + notes + question are sent to Claude (the user's own account) for Q&A/summary.
 - Audio never leaves the Mac and is deleted after finalize.
 - Required permissions: Microphone, Screen & System Audio Recording, Accessibility is **not** required (hotkeys via `RegisterEventHotKey` / KeyboardShortcuts package).
-- Recording people in person is Roman's responsibility; the menu bar dot makes recording state always visible.
+- Recording people in person is the user's responsibility; the menu bar dot makes recording state always visible.
 
 ## 10. Testing strategy (TDD)
 
@@ -184,7 +184,7 @@ Logs: `~/Library/Application Support/OnTrack/logs/{app,engine}.log`, rotating, 1
 
 - Swift: SwiftUI, AVFoundation, ScreenCaptureKit, [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (MIT).
 - Python 3.12 via `uv`: `mlx-whisper`, `silero-vad` (PyTorch; torch is already required by pyannote), `pyannote.audio` (requires free Hugging Face token + accepting model terms), `numpy`, `soundfile`, `pytest`.
-- Claude Code CLI (`claude`) logged in with Roman's subscription.
+- Claude Code CLI (`claude`) logged in with the user's subscription.
 
 ## 12. Risks
 

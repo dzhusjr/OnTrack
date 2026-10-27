@@ -29,7 +29,9 @@ class Config:
     echo_min_tokens: int = 3
     echo_window_s: float = 1.0
     echo_overlap: float = 0.5  # mic speech (not you) that overlaps call audio this much is speaker echo
-    my_names: tuple[str, ...] = ("Roman", "Roma", "Роман", "Романе", "Рома", "Ромо", "Ромчик")
+    # personal, stays on this Mac: set in the app (menu → Names & Trigger Words…) or in config.toml
+    my_names: tuple[str, ...] = ()  # your name + nicknames/trigger words; the first one is how Claude calls you
+    about_me: str = ""  # one line for interview answers, e.g. "a backend engineer (Python, Java)"
     suggest_delay_s: float = 0.8  # wait for the question to finish before suggesting an answer
     suggest_min_gap_s: float = 15.0  # between automatic suggestions for plain questions (names always trigger)
     suggest_context_lines: int = 40

@@ -1,4 +1,4 @@
-"""Headless Claude Code (`claude -p`) runner — free via Roman's subscription (spec D6)."""
+"""Headless Claude Code (`claude -p`) runner — free via your Claude subscription (spec D6)."""
 from __future__ import annotations
 
 import json

@@ -23,11 +23,11 @@ def by_time(fs):
 
 
 def test_end_to_end_labels_and_order(tmp_path):
-    p, w = make(tmp_path, [({"en": 1}, tr("hi I'm Roman")), ({"ru": 1}, tr("привет", lang="ru"))])
+    p, w = make(tmp_path, [({"en": 1}, tr("hi I'm Alex")), ({"ru": 1}, tr("привет", lang="ru"))])
     for f in frames(np.concatenate([tone(1.5, 0.3), silence(1.0), tone(1.5, 0.5), silence(1.0)]), Channel.MIC):
         p.process(f)
     p.finish()
-    assert [(l.speaker, l.text) for l in read_lines(w.dir)] == [(Speaker.ME, "hi I'm Roman"), (Speaker.OTHER, "привет")]
+    assert [(l.speaker, l.text) for l in read_lines(w.dir)] == [(Speaker.ME, "hi I'm Alex"), (Speaker.OTHER, "привет")]
 
 
 def test_silence_produces_no_lines(tmp_path):  # Review Focus 1

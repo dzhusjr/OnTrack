@@ -344,7 +344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + "a short reply is drafted. Separate with commas; case doesn't matter."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
         field.stringValue = settings.triggerWords.joined(separator: ", ")
-        field.placeholderString = Settings.defaultTriggerWords.joined(separator: ", ")
+        field.placeholderString = "e.g. Alex, Sasha, Олекса"
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
@@ -362,7 +362,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         sendSessionOptions()
-        store.showToast("Listening for: \(settings.triggerWords.prefix(4).joined(separator: ", "))\(settings.triggerWords.count > 4 ? "…" : "")")
+        store.showToast(settings.triggerWords.isEmpty ? "No names set — only the engine config's my_names are used"
+            : "Listening for: \(settings.triggerWords.prefix(4).joined(separator: ", "))\(settings.triggerWords.count > 4 ? "…" : "")")
     }
 
     private func suggestNow() {
@@ -495,7 +496,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             # llm_model = "sonnet"        # model used for questions and summaries
             # claude_path = ""            # full path to `claude` if OnTrack can't find it
             # allowed_langs = ["en", "nl", "uk"]   # add "ru" only if you want Russian output
-            # vocabulary = ["KU Leuven", "Raccoon Gang", "eigenvalue"]   # names/terms Whisper should spell right
+            # vocabulary = ["Kubernetes", "eigenvalue"]   # names/terms Whisper should spell right
+            # my_names = ["Alex", "Sasha"]                # your name + nicknames (also: menu → Names & Trigger Words…)
+            # about_me = "a backend engineer (Python, Go)"  # one line for Interview Mode answers
             # final_whisper_model = "mlx-community/whisper-large-v3-mlx" # model for the saved transcript
             # retranscribe = true         # re-run Whisper after the session for a cleaner final transcript
             # live_preview = true         # grey word-by-word preview while someone speaks (more GPU / battery)

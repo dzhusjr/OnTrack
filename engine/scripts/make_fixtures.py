@@ -18,7 +18,7 @@ SR = 16000
 ENROLL = (
     "My name is Daniel and this is a recording of my normal speaking voice. I am reading a short paragraph "
     "so that the transcriber can learn what I sound like. Today I will talk about lectures, meetings, "
-    "budgets and deadlines. The weather in Leuven is cloudy, but the coffee is good and the trains are "
+    "budgets and deadlines. The weather in Ghent is cloudy, but the coffee is good and the trains are "
     "mostly on time. I hope this is long enough to build a reliable voice print for the tests."
 )
 DIALOG = [

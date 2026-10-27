@@ -22,7 +22,7 @@ def fake(tmp_path, monkeypatch):
 
 def test_streams_partial_deltas(fake, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "deltas")
-    assert list(ClaudeRunner(fake).stream("hi", 10)) == ["Hel", "lo ", "Roman"]
+    assert list(ClaudeRunner(fake).stream("hi", 10)) == ["Hel", "lo ", "Alex"]
 
 
 def test_assistant_fallback_without_deltas(fake, monkeypatch):
@@ -76,7 +76,7 @@ def test_old_cli_without_flags_falls_back(fake, monkeypatch, tmp_path):  # revie
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "deltas")
     monkeypatch.setenv("FAKE_CLAUDE_REJECT", "--strict-mcp-config")
     cfg = replace(fake, llm_extra_args=("--strict-mcp-config", "--tools", ""))
-    assert ClaudeRunner(cfg).complete("hi", 10) == "Hello Roman"
+    assert ClaudeRunner(cfg).complete("hi", 10) == "Hello Alex"
 
 
 def test_default_flags_restrict_tools_and_mcp(fake, monkeypatch, tmp_path):

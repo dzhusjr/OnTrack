@@ -13,14 +13,14 @@
 {"type":"answer_done","id":"q1"}
 {"type":"session_stopped","session_id":"2026-10-23-1405-linear-algebra","duration_s":2820.5,"line_count":312}
 {"type":"finalize_progress","session_id":"2026-10-23-1405-linear-algebra","stage":"summarizing","pct":0.75}
-{"type":"finalize_done","session_id":"2026-10-23-1405-linear-algebra","notes_path":"/Users/dzhus/Desktop/Work/OnTrack/notes/2026-10-23-1405-linear-algebra"}
+{"type":"finalize_done","session_id":"2026-10-23-1405-linear-algebra","notes_path":"/Users/alex/Desktop/Work/OnTrack/notes/2026-10-23-1405-linear-algebra"}
 {"type":"enroll_done","score":0.93}
 {"type":"error","code":"llm_missing","message":"Claude Code CLI not found","recoverable":true}
 {"type":"partial","session_id":"2026-10-23-1405-linear-algebra","channel":0,"t_start":12.8,"text":"so the eigen"}
 {"type":"set_live","enabled":false}
 {"type":"set_paused","paused":true}
-{"type":"set_session_options","project_dir":"/Users/dzhus/PycharmProjects/cetl","languages":["uk"],"assist":true,"interview":false,"names":["Roman","Роман"],"connectors":false}
+{"type":"set_session_options","project_dir":"/Users/alex/PycharmProjects/acme","languages":["uk"],"assist":true,"interview":false,"names":["Alex","Олекса"],"connectors":false}
 {"type":"suggest","id":"s1"}
-{"type":"addressed","session_id":"2026-10-23-1405-linear-algebra","seq":7,"reason":"name","text":"Роман, скажи про продовження імплементації."}
+{"type":"addressed","session_id":"2026-10-23-1405-linear-algebra","seq":7,"reason":"name","text":"Олекса, скажи про продовження імплементації."}
 {"type":"suggestion_delta","id":"s1","text":"У п'ятницю буде"}
 {"type":"suggestion_done","id":"s1"}

@@ -32,9 +32,9 @@ final class ControlMessageTests: XCTestCase {
             "set_config": .setConfig(["tau": 0.6]),
             "set_live": .setLive(false),
             "set_paused": .setPaused(true),
-            "set_session_options": .setSessionOptions(SessionOptions(projectDir: "/Users/dzhus/PycharmProjects/cetl",
+            "set_session_options": .setSessionOptions(SessionOptions(projectDir: "/Users/alex/PycharmProjects/acme",
                                                                      languages: ["uk"], assist: true, interview: false,
-                                                                     names: ["Roman", "Роман"], connectors: false)),
+                                                                     names: ["Alex", "Олекса"], connectors: false)),
             "suggest": .suggest(id: "s1"),
         ]
         var seen = 0

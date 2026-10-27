@@ -47,11 +47,11 @@ def test_russian_is_never_output_by_default():
 
 
 def test_english_anchor_gives_punctuation_and_vocabulary_is_included():
-    cfg = replace(load_config(None), vocabulary=("Raccoon Gang", "eigenvalue"))
+    cfg = replace(load_config(None), vocabulary=("Acme", "eigenvalue"))
     asr = LangAsr({"en": 0.99}, {"en": ("hi", -0.2)})
     Transcriber(asr, cfg).transcribe(utt())
     prompt = asr.calls[0][1]
-    assert prompt.startswith(ANCHOR_PROMPTS["en"]) and "Raccoon Gang" in prompt and "eigenvalue" in prompt
+    assert prompt.startswith(ANCHOR_PROMPTS["en"]) and "Acme" in prompt and "eigenvalue" in prompt
 
 
 def test_output_that_only_repeats_the_prompt_is_dropped():

@@ -635,7 +635,7 @@ class EngineService:
             self.send({"type": "suggestion_done", "id": sid})
             return
         project = self.opts["project_dir"]
-        me = self.cfg.my_names[0] if self.cfg.my_names else "Roman"
+        me = self.cfg.my_names[0] if self.cfg.my_names else "the user"
 
         def job() -> None:
             if not self._suggest_lock.acquire(blocking=not auto):
@@ -659,7 +659,8 @@ class EngineService:
                               and needs_connectors(said or "", latest))
                 name = proj.name if proj else None
                 if interview:
-                    prompt = build_interview_prompt(tail, me, style=style, latest=latest, trigger=said)
+                    prompt = build_interview_prompt(tail, me, style=style, latest=latest, trigger=said,
+                                                    about=self.cfg.about_me)
                     said = said or "Reply"
                 elif said is None:  # Reply button / ⌥⇧A: answer the latest question or add what's worth saying
                     said = "Reply"
@@ -689,6 +690,18 @@ class EngineService:
                 self.send({"type": "suggestion_done", "id": sid})
 
         self._pool.submit(job)
+
+    def _project_names(self) -> tuple[str, ...]:
+        """The work folder's name and its repositories (e.g. search-api, …), offered to the summary for the session title."""
+        p = self.opts["project_dir"]
+        if p is None:
+            return ()
+        from .workdigest import find_repos
+
+        try:
+            return tuple(dict.fromkeys([p.name] + [r.name for r in find_repos(p)]))[:20]
+        except OSError:
+            return (p.name,)
 
     def _session_dir_for_qa(self) -> Path | None:
         if self.writer is not None and self.state in ("recording", "stopping"):
@@ -748,7 +761,8 @@ class EngineService:
         transcriber = Transcriber(self.final_asr, self.cfg) if self.cfg.retranscribe else None
         deps = FinalizeDeps(self.diarizer, self.backends.embedder,
                             load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy"),
-                            transcriber, self.runner, self.cfg, vad_factory=self.backends.vad_factory)
+                            transcriber, self.runner, self.cfg, vad_factory=self.backends.vad_factory,
+                            projects=self._project_names())
 
         def job() -> None:
             try:

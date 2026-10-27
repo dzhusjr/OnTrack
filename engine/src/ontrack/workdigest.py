@@ -1,4 +1,4 @@
-"""What Roman worked on recently in the project folder — handed to Claude so 'what did you do today?'
+"""What you worked on recently in the project folder — handed to Claude so 'what did you do today?'
 gets a concrete, ready-to-read answer instead of a template."""
 from __future__ import annotations
 

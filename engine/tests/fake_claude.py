@@ -26,10 +26,10 @@ def emit(o):
 
 emit({"type": "system", "subtype": "init"})
 if mode == "deltas":
-    for t in ["Hel", "lo ", "Roman"]:
+    for t in ["Hel", "lo ", "Alex"]:
         emit({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}}})
-    emit({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello Roman"}]}})
-    emit({"type": "result", "subtype": "success", "is_error": False, "result": "Hello Roman"})
+    emit({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello Alex"}]}})
+    emit({"type": "result", "subtype": "success", "is_error": False, "result": "Hello Alex"})
 elif mode == "assistant":
     emit({"type": "assistant", "message": {"content": [{"type": "text", "text": "Whole answer"}]}})
     emit({"type": "result", "subtype": "success", "is_error": False, "result": "Whole answer"})

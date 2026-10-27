@@ -10,7 +10,7 @@ import pytest
 from fakes import ME_VP, NOW, EnergyVad, FakeAsr, FakeEmbedder, LangAsr, frames, silence, tone, tr, utt
 from test_engine import SPEECH, Client, dirs, make_service, run_with, typ  # noqa: F401
 
-from ontrack.assist import address_reason, build_suggest_prompt, name_regex
+from ontrack.assist import address_reason, build_reply_prompt, build_suggest_prompt, name_regex
 from ontrack.config import load_config
 from ontrack.llm import ClaudeRunner
 from ontrack.pipeline import Backends, Pipeline
@@ -18,29 +18,29 @@ from ontrack.session import SessionWriter, read_lines
 from ontrack.transcriber import Transcriber
 from ontrack.types import Channel, Line, Speaker
 
-NAMES = name_regex(load_config(None).my_names)
+NAMES = name_regex(("Alex", "Olek", "Олекса", "Олексо", "Сашко"))
 
 
 def line(speaker, text, seq=0):
     return Line(seq, speaker, 0.0, 1.0, "uk", text)
 
 
-@pytest.mark.parametrize("text", ["Роман, скажи про продовження імплементації.", "Романе, ти тут?",
-                                  "Рома, глянь", "Roman, what do you think?", "ok ROMAN"])
+@pytest.mark.parametrize("text", ["Олекса, скажи про продовження імплементації.", "Олексо, ти тут?",
+                                  "Сашко, глянь", "Alex, what do you think?", "ok ALEX"])
 def test_name_mentions_are_detected(text):
     assert address_reason(line(Speaker.THEM, text), NAMES, interview=False) == "name"
 
 
 def test_not_a_name_and_not_from_me():
-    assert address_reason(line(Speaker.THEM, "Романтика і романи"), NAMES, False) is None
-    assert address_reason(line(Speaker.ME, "Роман тут"), NAMES, False) is None
+    assert address_reason(line(Speaker.THEM, "Олексатика і книжки"), NAMES, False) is None
+    assert address_reason(line(Speaker.ME, "Олекса тут"), NAMES, False) is None
     assert address_reason(line(Speaker.OTHER, "А що з тестами?"), NAMES, interview=False) is None
     assert address_reason(line(Speaker.OTHER, "А що з тестами?"), NAMES, interview=True) == "question"
 
 
 def test_suggest_prompt_is_brief_first_person_and_project_aware():
-    p = build_suggest_prompt("`00:01` **Them:** hi", "Роман, що по задачі?", "Roman", "cetl")
-    assert "At most 2 short sentences" in p and "first person" in p and '"cetl"' in p and "Роман, що по задачі?" in p
+    p = build_suggest_prompt("`00:01` **Them:** hi", "Олекса, що по задачі?", "Alex", "acme")
+    assert "At most 2 short sentences" in p and "first person" in p and '"acme"' in p and "Олекса, що по задачі?" in p
 
 
 # ---- language -------------------------------------------------------------------------------------
@@ -56,7 +56,7 @@ def test_short_utterance_keeps_channel_language_and_close_calls_stay():
 
 
 def test_switching_from_english_to_ukrainian_is_not_translated():
-    # the screenshot: the mic had been speaking English, Roman switches to Ukrainian
+    # the screenshot: the mic had been speaking English, Alex switches to Ukrainian
     asr = LangAsr({"uk": 0.7, "en": 0.3}, {"en": ("I will tell you what the Ukrainian is saying.", -0.20),
                                            "uk": ("Я розкажу, що зараз відбувається.", -0.35)})
     tx = Transcriber(asr, load_config(None))
@@ -93,7 +93,7 @@ def test_mic_pickup_of_call_audio_is_dropped_even_when_text_differs(tmp_path):
                    ({"uk": 1}, tr("Я на дев'ятій.", lang="uk"))])
     p = Pipeline(cfg, Backends(EnergyVad, asr, FakeEmbedder()), w, ME_VP)
     sys_ = frames(np.concatenate([tone(3.0, 0.3), silence(4.0)]), Channel.SYSTEM)
-    # mic: the speakers' echo (other voice, during the call speech), then Roman himself afterwards
+    # mic: the speakers' echo (other voice, during the call speech), then Alex himself afterwards
     mic = frames(np.concatenate([silence(0.2), tone(2.6, 0.5), silence(1.2), tone(1.5, 0.3), silence(1.5)]), Channel.MIC)
     for f in sorted(sys_ + mic, key=lambda f: (f.t_ns, -int(f.channel))):
         p.process(f)
@@ -105,7 +105,7 @@ def test_mic_pickup_of_call_audio_is_dropped_even_when_text_differs(tmp_path):
 
 # ---- engine ---------------------------------------------------------------------------------------
 def test_name_mention_sends_addressed_and_a_suggestion(dirs):
-    svc, cfg = make_service(dirs, [({"uk": 1}, tr("Роман, скажи про продовження імплементації.", lang="uk"))],
+    svc, cfg = make_service(dirs, [({"uk": 1}, tr("Олекса, скажи про продовження імплементації.", lang="uk"))],
                             runner_script=[["У п'ятницю ", "буде готово."]])
     svc.cfg = replace(cfg, suggest_delay_s=0.0)
 
@@ -115,7 +115,7 @@ def test_name_mention_sends_addressed_and_a_suggestion(dirs):
         await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
         await c.audio(frames(SPEECH, Channel.SYSTEM))
         a = await c.expect(typ("addressed"))
-        assert a["reason"] == "name" and a["text"].startswith("Роман")
+        assert a["reason"] == "name" and a["text"].startswith("Олекса")
         d = await c.expect(typ("suggestion_delta"))
         assert d["id"] == f"auto-{a['seq']}"
         await c.expect(typ("suggestion_done"))
@@ -126,11 +126,11 @@ def test_name_mention_sends_addressed_and_a_suggestion(dirs):
         await c.close()
 
     asyncio.run(run_with(svc, body))
-    assert "Роман, скажи" in svc.runner.prompts[0]
+    assert "Олекса, скажи" in svc.runner.prompts[0]
 
 
 def test_options_pass_project_folder_to_claude_and_lock_language(dirs, tmp_path):
-    project = tmp_path / "cetl"
+    project = tmp_path / "acme"
     project.mkdir()
     svc, cfg = make_service(dirs, [({"en": 0.9, "uk": 0.1}, tr("Поїхали.", lang="uk"))], runner_script=[["ok"]])
 
@@ -150,7 +150,7 @@ def test_options_pass_project_folder_to_claude_and_lock_language(dirs, tmp_path)
         await c.close()
 
     asyncio.run(run_with(svc, body))
-    assert svc.runner.project_dirs == [project] and '"cetl"' in svc.runner.prompts[0]
+    assert svc.runner.project_dirs == [project] and '"acme"' in svc.runner.prompts[0]
     assert svc.runner.models == ["haiku"]  # live answers use the fastest model
 
 
@@ -186,7 +186,7 @@ def test_runner_uses_project_cwd_and_read_only_tools(tmp_path, monkeypatch):
     exe.chmod(0o755)
     monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "log.json"))
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "deltas")
-    project = tmp_path / "cetl"
+    project = tmp_path / "acme"
     project.mkdir()
     cfg = replace(load_config(None), claude_path=str(exe))
     "".join(ClaudeRunner(cfg).stream("x", 10, project_dir=project))
@@ -203,7 +203,7 @@ def test_trigger_words_from_the_app_replace_the_default_names(dirs):
 
     async def body():
         c = await Client(cfg).connect()
-        await c.send({"type": "set_session_options", "names": ["backend team", "Ромчик"], "assist": False})
+        await c.send({"type": "set_session_options", "names": ["backend team", "Сашко"], "assist": False})
         await c.send({"type": "start_session", "name": "Standup"})
         await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
         await c.audio(frames(SPEECH, Channel.SYSTEM))
@@ -273,7 +273,7 @@ def test_connectors_enable_mcp_and_allow_each_server(tmp_path, monkeypatch):
 
 
 def test_connectors_option_reaches_claude_with_a_read_only_hint(dirs):
-    svc, cfg = make_service(dirs, [({"en": 1}, tr("Status of 1549?"))], runner_script=[["In review."]])
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("Status of 1234?"))], runner_script=[["In review."]])
     calls = []
     real = svc.runner.stream
 
@@ -304,11 +304,11 @@ def test_connectors_option_reaches_claude_with_a_read_only_hint(dirs):
 
 def test_name_in_a_line_labelled_me_still_counts_when_it_asks_something():
     # the voiceprint put a nearby voice on "Me": the screenshot case
-    assert address_reason(line(Speaker.ME, "Okay, Roman, hello. Tell us how much will be 2 plus 2."), NAMES, False) == "name"
-    assert address_reason(line(Speaker.ME, "Роман, скажи статус"), NAMES, False) == "name"
-    assert address_reason(line(Speaker.ME, "Hi, I'm Roman, what do you need?"), NAMES, False) is None  # self-intro
-    assert address_reason(line(Speaker.ME, "Мене звати Роман, як справи?"), NAMES, False) is None
-    assert address_reason(line(Speaker.ME, "Roman here, joining now."), NAMES, False) is None  # no question
+    assert address_reason(line(Speaker.ME, "Okay, Alex, hello. Tell us how much will be 2 plus 2."), NAMES, False) == "name"
+    assert address_reason(line(Speaker.ME, "Олекса, скажи статус"), NAMES, False) == "name"
+    assert address_reason(line(Speaker.ME, "Hi, I'm Alex, what do you need?"), NAMES, False) is None  # self-intro
+    assert address_reason(line(Speaker.ME, "Мене звати Олекса, як справи?"), NAMES, False) is None
+    assert address_reason(line(Speaker.ME, "Alex here, joining now."), NAMES, False) is None  # no question
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -322,7 +322,7 @@ def test_questions_without_question_mark(text, expected):
 
 
 @pytest.mark.parametrize("text,expected", [
-    ("how much is 2 plus 2", False), ("what's the status of 1549?", True), ("is CETL-231 merged?", True),
+    ("how much is 2 plus 2", False), ("what's the status of 1234?", True), ("is ACME-231 merged?", True),
     ("коли в нас зустріч з клієнтом?", True), ("check my email please", True), ("Добре, поїхали далі", False),
     ("what did he say about the deploy", False)])
 def test_connectors_only_when_relevant(text, expected):
@@ -373,7 +373,7 @@ def test_interview_mode_answers_from_general_knowledge_not_the_project(dirs, tmp
     svc, cfg = make_service(dirs, [({"en": 1}, tr("How would you deploy a machine learning model?"))],
                             runner_script=[["I'd containerise it and serve it behind an API."]])
     svc.cfg = replace(cfg, suggest_delay_s=0.0)
-    svc.digest.get = lambda p: "## cetl-search-api\nMon 17:10  Prioritize search results" if p else ""
+    svc.digest.get = lambda p: "## acme-search-api\nMon 17:10  Prioritize search results" if p else ""
 
     async def body():
         c = await Client(cfg).connect()
@@ -388,17 +388,17 @@ def test_interview_mode_answers_from_general_knowledge_not_the_project(dirs, tmp
     asyncio.run(run_with(svc, body))
     p = svc.runner.prompts[0]
     assert "How would you deploy a machine learning model?" in p and "general engineering knowledge" in p
-    assert "Never say he hasn't done it" in p and "<my_recent_work>" not in p and "cetl" not in p
+    assert "Never say they haven't done it" in p and "<my_recent_work>" not in p and "acme" not in p
     assert svc.runner.project_dirs == [None]  # no project folder, no connectors
 
 
 def test_prompts_forbid_filler_and_allow_saying_nothing():
     from ontrack.assist import NOTHING, build_interview_prompt, build_reply_prompt
 
-    for p in (build_reply_prompt("t", "Roman", "Work"), build_suggest_prompt("t", "Roman?", "Roman", None),
-              build_interview_prompt("t", "Roman")):
+    for p in (build_reply_prompt("t", "Alex", "Work"), build_suggest_prompt("t", "Alex?", "Alex", None),
+              build_interview_prompt("t", "Alex")):
         assert f"output exactly: {NOTHING}" in p
-    assert "NO generic filler" in build_reply_prompt("t", "Roman", None)
+    assert "NO generic filler" in build_reply_prompt("t", "Alex", None)
 
 
 def test_nothing_useful_is_not_saved(dirs):
@@ -420,9 +420,38 @@ def test_nothing_useful_is_not_saved(dirs):
     asyncio.run(run_with(svc, body))
 
 
-@pytest.mark.parametrize("text", ["what are you working on?", "Роман, що ти зробив?", "дай апдейт по задачі",
+@pytest.mark.parametrize("text", ["what are you working on?", "Олекса, що ти зробив?", "дай апдейт по задачі",
                                   "is it merged?"])
 def test_work_questions_may_use_connectors(text):
     from ontrack.connectors import needs_connectors
 
     assert needs_connectors(text)
+
+
+def test_no_personal_defaults_in_the_repo():
+    cfg = load_config(None)
+    assert cfg.my_names == () and cfg.about_me == ""
+    assert "Alex" not in build_reply_prompt("t", "the user", None)
+
+
+def test_auto_named_daily_gets_a_readable_notes_folder(tmp_path):
+    from ontrack.finalize import FinalizeDeps, finalize
+    from ontrack.naming import rename_notes, summary_title
+
+    sessions, notes = tmp_path / "sessions", tmp_path / "notes"
+    w = SessionWriter.start(sessions, "Session 10:43", NOW)
+    w.append(Speaker.THEM, 0, 1, "uk", "Добрий ранок, дейлі. Що по ACME?")
+    w.close(NOW)
+    cfg = replace(load_config(None), sessions_dir=sessions, notes_dir=notes, retranscribe=False)
+    runner = __import__("fakes").FakeRunner([["# Daily 2023-10-23 — ACME\n\n## TL;DR\nok"]])
+    out = finalize(w.dir, tmp_path / "audio", "save_all",
+                   FinalizeDeps(None, None, None, None, runner, cfg, projects=("Work", "ACME")), lambda *_: None)
+    assert out.name == f"{w.dir.name[:15]}-daily-acme" and (out / "summary.md").exists() and (out / "transcript.md").exists()
+    assert "pick from these project names if one fits: Work, ACME" in runner.prompts[0]
+    assert summary_title("# Lecture 2026-10-27 — Linear Algebra\n\n## TL;DR") == "Lecture 2026-10-27 — Linear Algebra"
+    named = SessionWriter.start(sessions, "Linear Algebra", NOW)  # a name you typed is kept
+    from ontrack.naming import is_auto_named
+    assert not is_auto_named(named.dir) and is_auto_named(w.dir)
+    d = notes / "2026-10-27-0900-session-09-00"
+    d.mkdir()
+    assert rename_notes(d, "Standup 2026-10-27 — Search API").name == "2026-10-27-0900-standup-search-api"

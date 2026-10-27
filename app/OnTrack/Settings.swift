@@ -88,7 +88,8 @@ struct Settings {
         nonmutating set { defaults.set(newValue, forKey: "interviewMode") }
     }
 
-    static let defaultTriggerWords = ["Roman", "Roma", "Роман", "Романе", "Рома", "Ромо", "Ромчик"]
+    /// No names ship with the app: yours stay in this Mac's settings (menu → Names & Trigger Words…).
+    static let defaultTriggerWords: [String] = []
 
     /// Your name, nicknames and anything else that should get your attention (case-insensitive, whole words).
     var triggerWords: [String] {
@@ -115,7 +116,7 @@ struct Settings {
 
     var echoCancellation: Bool {
         // Off by default: Apple voice processing fails or returns silence on some Macs (-10875).
-        // Enable with: defaults write com.romandzhus.ontrack echoCancellation -bool true
+        // Enable with: defaults write <bundle id> echoCancellation -bool true
         defaults.object(forKey: "echoCancellation") as? Bool ?? false
     }
 }

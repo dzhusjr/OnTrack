@@ -1,6 +1,6 @@
 # OnTrack M2–M6 — Full System Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans. Roman asked (2026-10-23) to implement M2–M6 in one run and test at the end; plan review gate waived by him explicitly.
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans. the user asked (2026-10-23) to implement M2–M6 in one run and test at the end; plan review gate waived by him explicitly.
 
 **Goal:** Turn the M1 engine into the full OnTrack system from the spec: engine service with sockets, Q&A and summaries via `claude -p`, post-processing, end-of-session save flow, and the SwiftUI menu-bar app with capture and the overlay.
 

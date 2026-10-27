@@ -2,6 +2,9 @@
 # OnTrack helper. Usage: scripts/dev.sh [all|setup|models|doctor|cert|test|app|run|reset-permissions]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Personal overrides stay on your Mac (git-ignored), e.g. ONTRACK_BUNDLE_ID=com.yourname.ontrack
+[ -f "$ROOT/scripts/local.env" ] && . "$ROOT/scripts/local.env"
+BUNDLE_ID="${ONTRACK_BUNDLE_ID:-com.ontrack.app}"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "✗ Missing '$1' — $2"; exit 1; }; }
 SIGN_ID="OnTrack Local Signing"
 has_cert() { security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; }
@@ -50,7 +53,7 @@ prereqs() {
   local free_gb; free_gb="$(df -g "$HOME" | awk 'NR==2 {print $4}')"
   [ "${free_gb:-0}" -ge 10 ] || echo "! Only ${free_gb} GB free — models and Python packages need about 8 GB"
   [ "$ROOT" = "$HOME/Desktop/Work/OnTrack" ] || \
-    echo "! Repo is at $ROOT — the app looks for ~/Desktop/Work/OnTrack. Run once: defaults write com.romandzhus.ontrack engineDir \"$ROOT/engine\""
+    echo "! Repo is at $ROOT — the app looks for ~/Desktop/Work/OnTrack. Run once: defaults write $BUNDLE_ID engineDir \"$ROOT/engine\""
   return $bad
 }
 
@@ -111,12 +114,12 @@ app() {
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     cp "$bin" "$app/Contents/MacOS/OnTrack"
     cp "$ROOT/app/Resources/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
-    cat > "$app/Contents/Info.plist" <<'PLIST'
+    cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>com.romandzhus.ontrack</string>
+  <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleName</key><string>OnTrack</string>
   <key>CFBundleDisplayName</key><string>OnTrack</string>
   <key>CFBundleExecutable</key><string>OnTrack</string>
@@ -145,8 +148,8 @@ case "${1:-all}" in
   doctor) doctor ;;
   cert) cert ;;
   reset-permissions)
-    tccutil reset Microphone com.romandzhus.ontrack
-    tccutil reset ScreenCapture com.romandzhus.ontrack ;;
+    tccutil reset Microphone "$BUNDLE_ID"
+    tccutil reset ScreenCapture "$BUNDLE_ID" ;;
   test) test_all ;;
   app) app ;;
   run) open ~/Applications/OnTrack.app ;;

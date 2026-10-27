@@ -29,10 +29,14 @@ def dirs(tmp_path):
     shutil.rmtree(sock, ignore_errors=True)
 
 
+TEST_NAMES = ("Alex", "Олекса", "Олексо", "Сашко")
+
+
 def make_service(dirs, asr_script=(), runner_script=(), live_preview=False):
     sock, tmp = dirs
     cfg = replace(load_config(None), app_support_dir=sock, sessions_dir=tmp / "sessions", notes_dir=tmp / "notes",
-                  live_preview=live_preview)  # previews consume scripted ASR answers; on only where tested
+                  live_preview=live_preview,  # previews consume scripted ASR answers; on only where tested
+                  my_names=TEST_NAMES)
     backends = Backends(EnergyVad, FakeAsr(list(asr_script)), FakeEmbedder())
     return EngineService(cfg, backends, FakeRunner(list(runner_script)), diarizer=Diar()), cfg
 

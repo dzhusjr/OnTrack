@@ -32,7 +32,7 @@ def fake_hub(token="hf_x", role="read", gated=(), whoami_status=None, cached=Non
         calls.append(("whoami",))
         if whoami_status:
             raise HTTPError(whoami_status)
-        return {"name": "roman", "auth": {"accessToken": {"role": role}}}
+        return {"name": "alex", "auth": {"accessToken": {"role": role}}}
 
     def auth_check(repo, token):
         calls.append(("auth_check", repo))

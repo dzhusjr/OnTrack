@@ -51,5 +51,5 @@ def test_accuracy_defaults():
 
 def test_vocabulary_from_toml(tmp_path):
     p = tmp_path / "c.toml"
-    p.write_text('vocabulary = ["KU Leuven", "eigenvalue", "Raccoon Gang"]\n')
-    assert load_config(p).vocabulary == ("KU Leuven", "eigenvalue", "Raccoon Gang")
+    p.write_text('vocabulary = ["the university", "eigenvalue", "Acme"]\n')
+    assert load_config(p).vocabulary == ("the university", "eigenvalue", "Acme")

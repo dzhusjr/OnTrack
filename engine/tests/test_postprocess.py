@@ -20,7 +20,7 @@ class FakeDiarizer:
 
 
 def setup(tmp_path):
-    """Mic audio: 0-2 s Roman (0.3), 3-5 s person X (0.5), 6-8 s person Y (0.7); system 9-10 s."""
+    """Mic audio: 0-2 s Alex (0.3), 3-5 s person X (0.5), 6-8 s person Y (0.7); system 9-10 s."""
     w = SessionWriter.start(tmp_path / "sessions", "S", NOW)
     rec = AudioRecorder(tmp_path / "audio", origin_ns=0)
     mic = np.concatenate([tone(2, 0.3), silence(1), tone(2, 0.5), silence(1), tone(2, 0.7), silence(3)])
@@ -29,7 +29,7 @@ def setup(tmp_path):
     for f in frames(np.concatenate([silence(9), tone(1, 0.3)]), Channel.SYSTEM):
         rec.write(f)
     rec.close()
-    w.append(Speaker.ME, 0, 2, "en", "roman live")
+    w.append(Speaker.ME, 0, 2, "en", "alex live")
     w.append(Speaker.OTHER, 3, 5, "en", "x live")
     w.append(Speaker.OTHER, 6, 8, "en", "y live")
     w.append(Speaker.THEM, 9, 10, "en", "call live")
@@ -44,7 +44,7 @@ def test_relabels_mic_lines_with_me_and_letters(tmp_path):
     w = setup(tmp_path)
     out = postprocess(w.dir, tmp_path / "audio", FakeDiarizer(SEGS), FakeEmbedder(), ME_VP, None, load_config(None))
     assert [l.speaker for l in out] == ["Me", "Speaker A", "Speaker B", "Them", "Note"]
-    assert [l.text for l in out][:3] == ["roman live", "x live", "y live"]
+    assert [l.text for l in out][:3] == ["alex live", "x live", "y live"]
     assert read_final_lines(w.dir) == out
     md = (w.dir / "transcript.final.md").read_text()
     assert "`00:00:03` **Speaker A:** x live" in md and md.startswith("# S\n")
@@ -64,11 +64,11 @@ def test_diarizer_failure_falls_back_to_live_labels(tmp_path):
 
 def test_retranscribe_uses_line_audio_span_and_skips_notes(tmp_path):
     w = setup(tmp_path)
-    asr = FakeAsr([({"en": 1}, tr(t)) for t in ["roman final", "x final", "y final", "call final"]])
+    asr = FakeAsr([({"en": 1}, tr(t)) for t in ["alex final", "x final", "y final", "call final"]])
     progress = []
     out = postprocess(w.dir, tmp_path / "audio", FakeDiarizer(SEGS), FakeEmbedder(), ME_VP,
                       Transcriber(asr, load_config(None)), load_config(None), progress=lambda s, p: progress.append(s))
-    assert [l.text for l in out] == ["roman final", "x final", "y final", "call final", "[gap 00:12]"]
+    assert [l.text for l in out] == ["alex final", "x final", "y final", "call final", "[gap 00:12]"]
     assert progress[0] == "separating" and "retranscribing" in progress
 
 
@@ -80,7 +80,7 @@ def test_missing_audio_keeps_live_transcript(tmp_path):
 
 
 def setup_two_speakers_one_line(tmp_path):
-    """One live line 0-6 s that actually contains Roman (0-3 s, amp 0.3) then person X (3-6 s, amp 0.5)."""
+    """One live line 0-6 s that actually contains Alex (0-3 s, amp 0.3) then person X (3-6 s, amp 0.5)."""
     w = SessionWriter.start(tmp_path / "sessions", "S", NOW)
     rec = AudioRecorder(tmp_path / "audio", origin_ns=0)
     for f in frames(np.concatenate([tone(3, 0.3), tone(3, 0.5), silence(2)]), Channel.MIC):

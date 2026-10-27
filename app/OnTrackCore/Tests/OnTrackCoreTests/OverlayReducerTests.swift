@@ -354,7 +354,7 @@ final class SuggestionReducerTests: XCTestCase {
         recording(&s)
         reduce(&s, .hide)
         XCTAssertEqual(s.mode, .hidden)
-        reduce(&s, .engine(.addressed(sessionId: "s1", seq: 4, reason: "name", text: "Роман, скажи")))
+        reduce(&s, .engine(.addressed(sessionId: "s1", seq: 4, reason: "name", text: "Олекса, скажи")))
         XCTAssertEqual(s.addressedSeqs, [4])
         XCTAssertEqual(s.mode, .collapsed)
         reduce(&s, .engine(.addressed(sessionId: "old", seq: 9, reason: "name", text: "x")))

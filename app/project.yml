@@ -1,6 +1,6 @@
 name: OnTrack
 options:
-  bundleIdPrefix: com.romandzhus
+  bundleIdPrefix: com.ontrack
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
@@ -26,7 +26,7 @@ targets:
         NSMicrophoneUsageDescription: "OnTrack transcribes lectures, meetings and calls locally on this Mac."
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.romandzhus.ontrack
+        PRODUCT_BUNDLE_IDENTIFIER: com.ontrack.app
         PRODUCT_NAME: OnTrack
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"

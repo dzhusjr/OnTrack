@@ -41,7 +41,7 @@ def test_follow_up_sees_earlier_questions(tmp_path):
     (tmp_path / "qa.md").write_text(
         "## Q (10:01) when is the deploy?\n\n**A:** Friday [00:01:00].\n\n"
         "## Q (10:02) who owns it?\n\n**A:** _(unanswered: llm_timeout)_\n\n"
-        "## Suggested reply (10:03) to: Roman?\n\nSure.\n\n")
+        "## Suggested reply (10:03) to: Alex?\n\nSure.\n\n")
     assert recent_exchanges((tmp_path / "qa.md").read_text()) == [("when is the deploy?", "Friday [00:01:00].")]
     runner = FakeRunner([["Next week."]])
     out = "".join(QaService(runner, load_config(None)).ask(tmp_path, "and the migration?"))

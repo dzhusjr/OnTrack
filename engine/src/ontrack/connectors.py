@@ -12,8 +12,8 @@ _NEEDS = re.compile(
     r"пошт\w*|лист\w*|імейл\w*|дедлайн\w*|статус\w*|прогрес\w*|апдейт\w*|зробив|зробила|працюєш|працював|"
     r"мерж\w*|реліз\w*|блокер\w*|"
     r"taak|taken|vergadering|agenda)(?!\w)"
-    r"|(?<![\w.])[A-Z][A-Z0-9]+-\d+(?!\w)"  # PROJ-1549
-    r"|(?<![\w.])#?\d{3,6}(?![\w.])",  # 1549 — a ticket number said out loud
+    r"|(?<![\w.])[A-Z][A-Z0-9]+-\d+(?!\w)"  # PROJ-123
+    r"|(?<![\w.])#?\d{3,6}(?![\w.])",  # 1234 — a ticket number said out loud
     re.IGNORECASE | re.UNICODE)
 
 

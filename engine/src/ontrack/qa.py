@@ -24,7 +24,7 @@ def recent_exchanges(qa_md: str, n: int = 4) -> list[tuple[str, str]]:
     return [(q, a) for q, a in pairs if a and not a.startswith("_(unanswered")][-n:]
 
 
-def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = "Roman",
+def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = "the user",
                     project: str | None = None, history: list[tuple[str, str]] | None = None,
                     connectors: bool = False) -> str:
     earlier = "".join(f"Q: {q}\nA: {a}\n\n" for q, a in (history or []))
@@ -35,7 +35,7 @@ def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = 
                     "about the project or its code.\n") if project else ""
     return (
         f"You are OnTrack, {me}'s live assistant during a lecture, meeting or conversation.\n"
-        f"Answer his question using the live transcript below{' and the project' if project else ''}.\n"
+        f"Answer their question using the live transcript below{' and the project' if project else ''}.\n"
         "Be brief: at most 3 short sentences or 4 short bullets. No preamble, no restating the question.\n"
         "The transcript is live speech recognition: silently read through misheard words and duplicates; never "
         "comment on transcript quality. Only if the specific answer is not there, say so in a few words.\n"
@@ -50,7 +50,7 @@ def build_qa_prompt(transcript_md: str, notes_md: str, question: str, me: str = 
     )
 
 
-CONNECTOR_HINT = ("You can also look things up with his connected tools (e.g. Jira, calendar, mail) when the answer "
+CONNECTOR_HINT = ("You can also look things up with their connected tools (e.g. Jira, calendar, mail) when the answer "
                   "depends on them — read only: never create, change, send or delete anything.\n")
 
 
@@ -75,7 +75,7 @@ class QaService:
             project_dir: Path | None = None, connectors: bool = False) -> Iterator[str]:
         session_dir = Path(session_dir)
         now = now or datetime.now()
-        me = self.cfg.my_names[0] if self.cfg.my_names else "Roman"
+        me = self.cfg.my_names[0] if self.cfg.my_names else "the user"
         with self._lock:
             notes = "\n\n".join(t for t in (_read(session_dir / "summary.md"), _read(session_dir / "notes.md")) if t.strip())
             prompt = build_qa_prompt(_read(session_dir / "transcript.md"), notes, question,

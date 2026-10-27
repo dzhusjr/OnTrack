@@ -1,4 +1,4 @@
-"""How Roman speaks: every `Me` line is collected (locally) so suggested replies sound like him."""
+"""How you speak: every `Me` line is collected (locally, never in the repo) so suggested replies sound like you."""
 from __future__ import annotations
 
 import json
@@ -87,7 +87,7 @@ def style_block(me: str, language: str | None, examples: list[str]) -> str:
     lang = f"Reply in {language} (the language of the conversation), always.\n" if language else \
         "Reply in the language of the conversation.\n"
     ex = "\n".join(f"- {e}" for e in examples)
-    how = (f"Sound like {me}: reuse his word choice, sentence length and the way he opens and phrases things, "
-           f"from these real lines of him speaking (speech recognition, may contain errors — copy the style, not "
-           f"the content):\n<how_{me.lower()}_speaks>\n{ex}\n</how_{me.lower()}_speaks>\n") if examples else ""
+    how = (f"Sound like {me}: reuse their word choice, sentence length and the way they open and phrase things, "
+           f"from these real lines of them speaking (speech recognition, may contain errors — copy the style, not "
+           f"the content):\n<how_they_speak>\n{ex}\n</how_they_speak>\n") if examples else ""
     return (lang + "Tone: polite and professional (fairly formal), unless the conversation is clearly casual.\n" + how)
