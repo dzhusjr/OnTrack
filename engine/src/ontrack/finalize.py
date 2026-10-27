@@ -13,11 +13,13 @@ from .config import Config
 from .llm import LlmError
 from .postprocess import postprocess
 from .recorder import delete_audio
+from .session import paused_ranges
 from .naming import is_auto_named, rename_notes, summary_title
 from .summarize import summarize
 
 log = logging.getLogger(__name__)
 ACTIONS = ("save_all", "transcript_only", "discard")
+SESSION_ID_FILE = ".session_id"  # in each notes folder: which session (and kept audio) it came from
 
 
 @dataclass
@@ -45,7 +47,10 @@ def finalize(
     progress: Callable[[str, float], None],
     on_summary_error: Callable[[LlmError], None] | None = None,
     on_warning: Callable[[str], None] | None = None,
+    improve: bool = True,
 ) -> Path | None:
+    """improve=False keeps the live transcript (fast, light on battery) and keeps the audio, so the session can
+    be improved later from the Notes window. Stretches recorded with live transcription off are always transcribed."""
     if action not in ACTIONS:
         raise ValueError(f"unknown finalize action {action!r}")
     session_dir, audio_dir = Path(session_dir), Path(audio_dir)
@@ -55,12 +60,9 @@ def finalize(
         progress("done", 1.0)
         return None
 
-    try:
-        postprocess(session_dir, audio_dir, deps.diarizer, deps.embedder, deps.voiceprint, deps.transcriber,
-                    deps.cfg, progress=lambda s, p: progress(s, 0.05 + 0.6 * p), on_warning=on_warning,
-                    vad_factory=deps.vad_factory)
-    except Exception as e:  # never lose the transcript because post-processing broke
-        log.exception("post-processing failed: %s", e)
+    heavy = improve or bool(paused_ranges(session_dir))
+    if heavy:
+        _postprocess(session_dir, audio_dir, deps, progress, on_warning)
 
     notes = deps.cfg.notes_dir / session_dir.name
     notes.mkdir(parents=True, exist_ok=True)
@@ -85,9 +87,50 @@ def finalize(
     _copy_if(session_dir / "qa.md", notes / "qa.md")
     _copy_if(session_dir / "notes.md", notes / "notes.md")
     (notes / ".pending_sync").touch()
+    (notes / SESSION_ID_FILE).write_text(session_dir.name, encoding="utf-8")
+    if heavy:
+        delete_audio(audio_dir)  # otherwise kept for "Improve Transcript" later
+    progress("done", 1.0)
+    return notes
+
+
+def _postprocess(session_dir: Path, audio_dir: Path, deps: FinalizeDeps, progress, on_warning) -> None:
+    try:
+        postprocess(session_dir, audio_dir, deps.diarizer, deps.embedder, deps.voiceprint, deps.transcriber,
+                    deps.cfg, progress=lambda s, p: progress(s, 0.05 + 0.6 * p), on_warning=on_warning,
+                    vad_factory=deps.vad_factory)
+    except Exception as e:  # never lose the transcript because post-processing broke
+        log.exception("post-processing failed: %s", e)
+
+
+def improve_saved(session_dir: Path, audio_dir: Path, notes: Path, deps: FinalizeDeps,
+                  progress: Callable[[str, float], None], on_warning: Callable[[str], None] | None = None) -> Path:
+    """Later 'Improve Transcript': speaker separation + accurate model on the kept audio; replaces transcript.md."""
+    session_dir, audio_dir, notes = Path(session_dir), Path(audio_dir), Path(notes)
+    if not audio_dir.exists():
+        raise FileNotFoundError("The audio of this session is gone (it is deleted once a transcript is improved).")
+    _postprocess(session_dir, audio_dir, deps, progress, on_warning)
+    progress("saving", 0.9)
+    final = session_dir / "transcript.final.md"
+    shutil.copyfile(final if final.exists() else session_dir / "transcript.md", notes / "transcript.md")
+    (notes / ".pending_sync").touch()
     delete_audio(audio_dir)
     progress("done", 1.0)
     return notes
+
+
+def notes_dir_for(notes_root: Path, session_id: str) -> Path:
+    """Saved notes of a session (their folder may have been renamed to e.g. ...-daily-search-api)."""
+    plain = Path(notes_root) / session_id
+    if plain.exists():
+        return plain
+    for marker in Path(notes_root).glob(f"*/{SESSION_ID_FILE}"):
+        try:
+            if marker.read_text(encoding="utf-8").strip() == session_id:
+                return marker.parent
+        except OSError:
+            continue
+    return plain
 
 
 def retry_summary(notes: Path, session_dir: Path, runner, cfg: Config) -> None:

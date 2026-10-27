@@ -23,9 +23,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resumeSessionId: String?  // set while waiting for a restarted engine to resume our session
     private var lastFinalizeSessionId: String?
     private var pendingSummarySessionId: String?
-    private lazy var notesWindow = NotesWindowController(notesDir: settings.notesDir) { [weak self] id, question, sid in
-        self?.client.send(.askAbout(id: id, question: question, sessionId: sid))
-    }
+    private lazy var notesWindow: NotesWindowController = {
+        let w = NotesWindowController(notesDir: settings.notesDir) { [weak self] id, question, sid in
+            self?.client.send(.askAbout(id: id, question: question, sessionId: sid))
+        }
+        w.audioDir = settings.appSupportDir.appendingPathComponent("audio", isDirectory: true)
+        w.onImprove = { [weak self] sid in
+            guard let self else { return }
+            self.client.send(.improve(sessionId: sid))
+            self.store.showToast("Improving the transcript — accurate model + speakers (takes a few minutes)")
+        }
+        return w
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: settings.appSupportDir, withIntermediateDirectories: true)
@@ -109,6 +118,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 suggestNow: { [weak self] in self?.suggestNow() },
                 editTriggerWords: { [weak self] in self?.editTriggerWords() },
                 saveNotesToProject: { [weak self] in self?.settings.saveNotesToProject ?? false },
+                improveAfterRecording: { [weak self] in self?.settings.improveAfterRecording ?? false },
+                toggleImproveAfterRecording: { [weak self] in
+                    guard let self else { return }
+                    self.settings.improveAfterRecording.toggle()
+                    self.store.showToast(self.settings.improveAfterRecording
+                        ? "After recording: accurate re-transcription + speakers (slower, uses battery)"
+                        : "After recording: keep the live transcript (fast) — improve any session later in Notes")
+                },
                 toggleSaveNotesToProject: { [weak self] in
                     guard let self else { return }
                     self.settings.saveNotesToProject.toggle()
@@ -141,6 +158,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             if case let .finalize(sid, action) = msg {
                 self.lastFinalizeSessionId = sid
+                if action != .discard && !self.settings.improveAfterRecording {
+                    self.client.send(.finalizeLight(sessionId: sid, action: action))  // fast, light on battery
+                    return
+                }
                 if PowerPolicy.deferFinalize(action, onBattery: PowerMonitor.onBattery,
                                              waitForPower: self.settings.waitForPowerToFinalize) {
                     self.queue.add(sessionId: sid, action: action)  // audio is kept until it's processed

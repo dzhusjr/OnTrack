@@ -19,6 +19,14 @@ final class NotesBrowserModel: ObservableObject {
     @Published private(set) var threads: [String: [QAExchange]] = [:]  // per session, this window's questions
     @Published private(set) var pending: Pending?
     var ask: ((_ id: String, _ question: String, _ sessionId: String) -> Void)?
+    var onImprove: ((String) -> Void)?
+    var audioDir: URL?
+
+    /// The recording's audio is still kept (saved without the heavy pass) → it can be improved.
+    func canImprove(_ s: NoteSession) -> Bool {
+        guard let dir = audioDir, onImprove != nil else { return false }
+        return FileManager.default.fileExists(atPath: dir.appendingPathComponent(s.sessionId).path)
+    }
 
     init(notesDir: URL) { self.notesDir = notesDir }
 
@@ -87,6 +95,16 @@ final class NotesWindowController: NSObject, NSWindowDelegate {
     }
 
     func receive(_ msg: Inbound) { model.receive(msg) }
+
+    var onImprove: ((String) -> Void)? {
+        get { model.onImprove }
+        set { model.onImprove = newValue }
+    }
+
+    var audioDir: URL? {
+        get { model.audioDir }
+        set { model.audioDir = newValue }
+    }
 
     func show(sessionId: String? = nil) {
         if let id = sessionId { model.select(id) } else { model.reload() }
@@ -235,6 +253,12 @@ private struct NoteDetailView: View {
                     .fixedSize()
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
+                    if model.canImprove(session) {
+                        Button { model.onImprove?(session.sessionId) } label: {
+                            Label("Improve Transcript", systemImage: "wand.and.stars")
+                        }
+                        .help("Re-transcribe with the accurate model and separate speakers (takes a few minutes)")
+                    }
                     Button { copy(md) } label: { Label("Copy", systemImage: "doc.on.doc") }
                         .help("Copy this page as Markdown")
                     Button { NSWorkspace.shared.open(session.file(kind)) } label: {

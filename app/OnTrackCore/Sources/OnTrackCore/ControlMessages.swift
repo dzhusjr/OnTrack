@@ -183,10 +183,12 @@ public enum Outbound: Equatable, Sendable {
     case setSessionOptions(SessionOptions)
     case suggest(id: String)
     case askAbout(id: String, question: String, sessionId: String)  // a saved session (Notes window)
+    case finalizeLight(sessionId: String, action: FinalizeAction)  // keep the live transcript + audio (no heavy pass)
+    case improve(sessionId: String)  // later: accurate re-transcription of a saved session from its kept audio
 
     public static let typeNames: Set<String> = [
         "ping", "start_session", "stop_session", "ask", "finalize", "retry_summary", "enroll_start", "set_config",
-        "set_live", "set_paused", "set_session_options", "suggest",
+        "set_live", "set_paused", "set_session_options", "suggest", "improve",
     ]
 
     public var jsonObject: [String: Any] {
@@ -206,6 +208,9 @@ public enum Outbound: Equatable, Sendable {
                     "assist": o.assist, "interview": o.interview, "names": o.names, "connectors": o.connectors]
         case let .suggest(id): return ["type": "suggest", "id": id]
         case let .askAbout(id, q, sid): return ["type": "ask", "id": id, "question": q, "session_id": sid]
+        case let .finalizeLight(sid, action):
+            return ["type": "finalize", "session_id": sid, "action": action.rawValue, "improve": false]
+        case let .improve(sid): return ["type": "improve", "session_id": sid]
         }
     }
 

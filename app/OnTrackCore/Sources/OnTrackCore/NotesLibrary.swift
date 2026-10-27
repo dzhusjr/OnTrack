@@ -23,6 +23,7 @@ public struct NoteSession: Identifiable, Equatable, Sendable {
     public let date: Date?
     public let kinds: [Kind]
     public let modified: Date
+    public var sessionId: String = ""  // the recording it came from (folder may have been renamed)
 
     public func file(_ kind: Kind) -> URL { folder.appendingPathComponent(kind.fileName) }
 }
@@ -46,8 +47,12 @@ public enum NotesLibrary {
             }.max() ?? .distantPast
             let firstFile = folder.appendingPathComponent(kinds[0].fileName)
             let heading = (try? String(contentsOf: firstFile, encoding: .utf8)).flatMap(firstHeading)
-            sessions.append(NoteSession(id: id, folder: folder, title: heading ?? fallbackTitle(id),
-                                        date: date(fromId: id), kinds: kinds, modified: modified))
+            var s = NoteSession(id: id, folder: folder, title: heading ?? fallbackTitle(id),
+                                date: date(fromId: id), kinds: kinds, modified: modified)
+            let marker = folder.appendingPathComponent(".session_id")
+            s.sessionId = ((try? String(contentsOf: marker, encoding: .utf8)) ?? id)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            sessions.append(s)
         }
         // dated sessions newest first; folders without a date in their name after them, newest edit first
         return sessions.sorted { a, b in

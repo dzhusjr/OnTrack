@@ -36,6 +36,7 @@ final class ControlMessageTests: XCTestCase {
                                                                      languages: ["uk"], assist: true, interview: false,
                                                                      names: ["Alex", "Олекса"], connectors: false)),
             "suggest": .suggest(id: "s1"),
+            "improve": .improve(sessionId: "2026-10-23-1405-linear-algebra"),
         ]
         var seen = 0
         for line in try goldenLines() {
@@ -76,5 +77,15 @@ final class AskAboutTests: XCTestCase {
         XCTAssertEqual(obj["type"] as? String, "ask")
         XCTAssertEqual(obj["session_id"] as? String, "2026-10-24-2216-x")
         XCTAssertEqual(obj["question"] as? String, "when?")
+    }
+}
+
+final class LightFinalizeTests: XCTestCase {
+    func testLightFinalizeKeepsLiveTranscript() throws {
+        let obj = try JSONSerialization.jsonObject(
+            with: Outbound.finalizeLight(sessionId: "s1", action: .saveAll).encoded()) as! [String: Any]
+        XCTAssertEqual(obj["type"] as? String, "finalize")
+        XCTAssertEqual(obj["action"] as? String, "save_all")
+        XCTAssertEqual(obj["improve"] as? Bool, false)
     }
 }

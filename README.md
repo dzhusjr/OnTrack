@@ -134,6 +134,7 @@ If you change a model in the engine config, run `scripts/dev.sh models` once to 
 | Show / hide overlay | ⌥Space (or the eye icon on the bar) |
 | Pause / resume recording | ⌥⇧P. Nothing is recorded or transcribed while paused; the transcript gets a `[recording paused mm:ss]` note |
 | Live transcription on/off | ⌥⇧L, the bubble icon on the bar, or menu → Live Transcription. Off = record only; transcribed when you save |
+| Light save (default) | after recording the live transcript is saved right away — no heavy pass. Menu → Improve Transcript After Recording turns on the accurate re-transcription + speaker separation; or improve any single session later: Notes → **Improve Transcript** (its audio is kept until then) |
 | Save battery | menu → Transcribe After Recording Only When Plugged In: on battery, Save keeps the audio and the heavy work (speaker separation, large-v3, summary) runs once you plug in |
 | Ask about the session | ⌥Space → type → Enter (Esc to collapse). Answers are kept to a few lines |
 | Someone says your name | the line gets a 👋 marker, the bar pops up, and a 1–2 line suggested reply appears. Menu → Names & Trigger Words… sets which words count (name, nicknames, anything); menu → Auto-Suggest Replies turns the drafted reply off (lines are still highlighted) |

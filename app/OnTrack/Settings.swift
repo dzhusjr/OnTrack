@@ -104,6 +104,13 @@ struct Settings {
     }
 
     /// Let answers use the connectors set up in Claude Code (`claude mcp list`), e.g. Jira. Slower.
+    /// After recording: re-transcribe with the accurate model + separate speakers (heavy, uses battery).
+    /// Off = keep the live transcript right away; "Improve Transcript" in Notes can do it later.
+    var improveAfterRecording: Bool {
+        get { defaults.object(forKey: "improveAfterRecording") as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: "improveAfterRecording") }
+    }
+
     var useConnectors: Bool {
         get { defaults.object(forKey: "useConnectors") as? Bool ?? false }
         nonmutating set { defaults.set(newValue, forKey: "useConnectors") }

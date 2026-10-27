@@ -42,6 +42,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var suggestNow: () -> Void
         var editTriggerWords: () -> Void
         var saveNotesToProject: () -> Bool
+        var improveAfterRecording: () -> Bool
+        var toggleImproveAfterRecording: () -> Void
         var toggleSaveNotesToProject: () -> Void
         var connectors: () -> Bool
         var toggleConnectors: () -> Void
@@ -215,6 +217,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         conn.toolTip = "Answers and replies may look things up with the connectors set up in Claude Code "
             + "(claude mcp list), read-only. Adds a few seconds."
         menu.addItem(conn)
+        let improve = NSMenuItem(title: "Improve Transcript After Recording (Slower, Uses Battery)",
+                                 action: #selector(toggleImprove), keyEquivalent: "")
+        improve.target = self
+        improve.state = s.improveAfterRecording() ? .on : .off
+        improve.toolTip = "Off: the live transcript is saved right away. Any session can be improved later: "
+            + "Notes → Improve Transcript."
+        menu.addItem(improve)
         add(menu, "Names & Trigger Words…", #selector(editTriggerWords))
         add(menu, "Suggest a Reply Now", #selector(suggestNow), key: "a", mods: [.option, .shift], enabled: state.recording)
         menu.addItem(.separator())
@@ -227,6 +236,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func toggleInterview() { actions.session.toggleInterview() }
     @objc private func suggestNow() { actions.session.suggestNow() }
     @objc private func editTriggerWords() { actions.session.editTriggerWords() }
+    @objc private func toggleImprove() { actions.session.toggleImproveAfterRecording() }
     @objc private func toggleConnectors() { actions.session.toggleConnectors() }
     @objc private func toggleSaveToProject() { actions.session.toggleSaveNotesToProject() }
 

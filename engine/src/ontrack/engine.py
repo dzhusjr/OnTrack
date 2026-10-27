@@ -20,7 +20,7 @@ import numpy as np
 from .audio_source import FrameDecoder
 from .config import Config, apply_overrides, load_config
 from .control import NdjsonDecoder, ProtocolError, encode, validate
-from .finalize import FinalizeDeps, finalize, retry_summary
+from .finalize import FinalizeDeps, finalize, improve_saved, notes_dir_for, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .assist import (address_reason, build_interview_prompt, build_reply_prompt, build_suggest_prompt, name_regex,
@@ -271,7 +271,9 @@ class EngineService:
         elif t == "ask":
             self._ask(msg["id"], msg["question"], msg.get("session_id"))
         elif t == "finalize":
-            self._finalize(msg["session_id"], msg["action"])
+            self._finalize(msg["session_id"], msg["action"], bool(msg.get("improve", True)))
+        elif t == "improve":
+            self._improve(msg["session_id"])
         elif t == "retry_summary":
             self._retry_summary(msg["session_id"])
         elif t == "enroll_start":
@@ -746,7 +748,44 @@ class EngineService:
         d = self.cfg.sessions_dir / session_id
         return d if (d / "meta.json").exists() else None
 
-    def _finalize(self, session_id: str, action: str) -> None:
+    def _finalize_deps(self) -> FinalizeDeps:
+        transcriber = Transcriber(self.final_asr, self.cfg) if self.cfg.retranscribe else None
+        return FinalizeDeps(self.diarizer, self.backends.embedder,
+                            load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy"),
+                            transcriber, self.runner, self.cfg, vad_factory=self.backends.vad_factory,
+                            projects=self._project_names())
+
+    def _improve(self, session_id: str) -> None:
+        session_dir = self._valid_session(session_id)
+        audio = self._audio_dir(session_id) if session_dir is not None else None
+        if session_dir is None or audio is None or not audio.exists():
+            self._send_now(self._error("no_audio", "This session can't be improved: its audio is no longer kept."))
+            return
+        if session_id in self._finalizing:
+            self._send_now(self._error("busy", "That session is already being processed."))
+            return
+        self._finalizing.add(session_id)
+        if self.state == "idle":
+            self._set_state("postprocessing")
+        notes, deps = notes_dir_for(self.cfg.notes_dir, session_id), self._finalize_deps()
+
+        def job() -> None:
+            try:
+                out = improve_saved(session_dir, audio, notes, deps,
+                                    lambda stage, pct: self.send({"type": "finalize_progress", "session_id": session_id,
+                                                                  "stage": stage, "pct": round(pct, 3)}),
+                                    on_warning=lambda text: self.send(self._error("diarization_unavailable", text)))
+                self.send({"type": "finalize_done", "session_id": session_id, "notes_path": str(out)})
+            except Exception as e:
+                log.exception("improve failed")
+                self.send(self._error("finalize_failed", str(e)))
+            finally:
+                self._finalizing.discard(session_id)
+                self._call(self._finalize_finished)
+
+        self._pool.submit(job)
+
+    def _finalize(self, session_id: str, action: str, improve: bool = True) -> None:
         session_dir = self._valid_session(session_id)
         if session_dir is None:
             self._send_now(self._error("no_session", f"Unknown session {session_id}"))
@@ -758,11 +797,7 @@ class EngineService:
         self._finalizing.add(session_id)
         if self.state == "idle":
             self._set_state("postprocessing")
-        transcriber = Transcriber(self.final_asr, self.cfg) if self.cfg.retranscribe else None
-        deps = FinalizeDeps(self.diarizer, self.backends.embedder,
-                            load_voiceprint(self.cfg.app_support_dir / "voiceprint.npy"),
-                            transcriber, self.runner, self.cfg, vad_factory=self.backends.vad_factory,
-                            projects=self._project_names())
+        deps = self._finalize_deps()
 
         def job() -> None:
             try:
@@ -773,6 +808,7 @@ class EngineService:
                     on_summary_error=lambda e: self.send(self._error(
                         "summary_failed", f"Summary failed ({e.code}): {e.message} — use Retry Summary in the menu.")),
                     on_warning=lambda text: self.send(self._error("diarization_unavailable", text)),
+                    improve=improve,
                 )
                 if action == "discard" and self.last_session == session_dir:
                     self.last_session = None
@@ -795,7 +831,7 @@ class EngineService:
         if session_dir is None:
             self._send_now(self._error("no_session", f"Unknown session {session_id}"))
             return
-        notes = self.cfg.notes_dir / session_id
+        notes = notes_dir_for(self.cfg.notes_dir, session_id)
 
         def job() -> None:
             try:
