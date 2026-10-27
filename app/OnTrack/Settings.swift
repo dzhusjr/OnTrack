@@ -96,9 +96,9 @@ struct Settings {
         nonmutating set { defaults.set(newValue, forKey: "triggerWords") }
     }
 
-    /// Also copy each saved session's notes into "<project>/OnTrack Notes".
+    /// Also copy each saved session's notes into "<project>/Meetings/<date>/". On by default (ticked on the save card).
     var saveNotesToProject: Bool {
-        get { defaults.object(forKey: "saveNotesToProject") as? Bool ?? false }
+        get { defaults.object(forKey: "saveNotesToProject") as? Bool ?? true }
         nonmutating set { defaults.set(newValue, forKey: "saveNotesToProject") }
     }
 

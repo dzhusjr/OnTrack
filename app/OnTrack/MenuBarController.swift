@@ -172,12 +172,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let choose = NSMenuItem(title: "Choose Folder…", action: #selector(chooseProject), keyEquivalent: "")
         choose.target = self
         projects.addItem(choose)
-        let saveHere = NSMenuItem(title: "Also Save Notes Into This Folder", action: current == nil ? nil : #selector(toggleSaveToProject),
+        let saveHere = NSMenuItem(title: "Also Save Notes Into Meetings/<date> Here", action: current == nil ? nil : #selector(toggleSaveToProject),
                                   keyEquivalent: "")
         saveHere.target = self
         saveHere.isEnabled = current != nil
         saveHere.state = s.saveNotesToProject() ? .on : .off
-        saveHere.toolTip = "Copies each saved session to “OnTrack Notes” inside the project folder"
+        saveHere.toolTip = "Copies each saved session to <project>/Meetings/<date>/ (also a checkbox on the save card)"
         projects.addItem(saveHere)
         projectItem.submenu = projects
         projectItem.toolTip = "Claude answers questions and suggests replies with this folder (and its CLAUDE.md) as context"

@@ -112,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 toggleSaveNotesToProject: { [weak self] in
                     guard let self else { return }
                     self.settings.saveNotesToProject.toggle()
+                    self.refreshProjectSave()
                     self.store.showToast(self.settings.saveNotesToProject ? "Notes will also be saved into the project folder"
                                                                           : "Notes no longer saved into the project folder")
                 },
@@ -128,6 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ))
 
         store.onLiveToggled = { [weak self] on in self?.settings.liveByDefault = on }
+        store.onSaveToProjectChanged = { [weak self] on in self?.settings.saveNotesToProject = on }
+        refreshProjectSave()
         power.onChange = { [weak self] onBattery in
             guard let self, !onBattery, !self.queue.items.isEmpty else { return }
             self.store.showToast("Plugged in — finishing \(self.queue.items.count) saved session(s)")
@@ -249,7 +252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 export(notesPath: path, to: folder)
             }
             if !path.isEmpty, settings.saveNotesToProject, let project = settings.projectDir {
-                export(notesPath: path, to: URL(fileURLWithPath: project).appendingPathComponent("OnTrack Notes"))
+                let id = URL(fileURLWithPath: path).lastPathComponent
+                export(notesPath: path, to: NotesExporter.meetingsFolder(project: URL(fileURLWithPath: project),
+                                                                        date: NotesLibrary.date(fromId: id) ?? Date()))
             }
         default:
             break
@@ -315,8 +320,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.send(.setSessionOptions(settings.sessionOptions))
     }
 
+    /// The save card's "Also save to Work/Meetings/<today>" checkbox.
+    private func refreshProjectSave() {
+        store.projectSaveLabel = settings.projectDir.map { p in
+            let day = NotesExporter.meetingsFolder(project: URL(fileURLWithPath: p), date: Date()).lastPathComponent
+            return "\(URL(fileURLWithPath: p).lastPathComponent)/Meetings/\(day)"
+        }
+        store.saveToProject = settings.saveNotesToProject
+    }
+
     private func setProject(_ path: String?) {
         settings.projectDir = path
+        refreshProjectSave()
         sendSessionOptions()
         store.showToast(path.map { "Claude now answers with “\(URL(fileURLWithPath: $0).lastPathComponent)” as context" }
                         ?? "No project folder")
@@ -362,8 +377,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func toggleRecording(askName: Bool) {
+        if store.state.engineState == "stopping" {  // second press while the last words are still transcribed
+            store.showToast("Stopping — finishing the last phrases…")
+            return
+        }
         if store.state.recording {
             client.send(.stopSession)
+            store.showToast("Stopping — finishing the last phrases…")  // instant feedback; the save card follows
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.capture.stop() }
             return
         }
@@ -371,12 +391,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.showIssue("The engine is \(store.state.engineState) — try again in a moment.")
             return
         }
-        // Starting the next lecture while the previous end card is open: save the previous one (the default action).
-        if let card = store.state.endCard, store.state.mode == .endCard || store.state.mode == .done {
-            if store.state.mode == .endCard { client.send(.finalize(sessionId: card.sessionId, action: .saveAll)) }
-            lastFinalizeSessionId = card.sessionId
-            store.send(.dismiss)
+        // The previous session must be decided (and saved) before a new one starts: never decide for the user.
+        if store.state.endCard != nil, store.state.progress == nil {
+            store.send(.showEndCard)
+            store.showToast("Choose what to do with the previous session first")
+            return
         }
+        if store.state.progress != nil, processingSessionId == nil {
+            store.send(.showEndCard)
+            store.showToast("Still saving the previous session — you can start a new one when it's done")
+            return
+        }
+        if store.state.mode == .done { store.send(.dismiss) }
         let fallback = "Session \(Self.timeFormatter.string(from: Date()))"
         let name: String
         if askName {

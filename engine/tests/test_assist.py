@@ -390,3 +390,39 @@ def test_interview_mode_answers_from_general_knowledge_not_the_project(dirs, tmp
     assert "How would you deploy a machine learning model?" in p and "general engineering knowledge" in p
     assert "Never say he hasn't done it" in p and "<my_recent_work>" not in p and "cetl" not in p
     assert svc.runner.project_dirs == [None]  # no project folder, no connectors
+
+
+def test_prompts_forbid_filler_and_allow_saying_nothing():
+    from ontrack.assist import NOTHING, build_interview_prompt, build_reply_prompt
+
+    for p in (build_reply_prompt("t", "Roman", "Work"), build_suggest_prompt("t", "Roman?", "Roman", None),
+              build_interview_prompt("t", "Roman")):
+        assert f"output exactly: {NOTHING}" in p
+    assert "NO generic filler" in build_reply_prompt("t", "Roman", None)
+
+
+def test_nothing_useful_is_not_saved(dirs):
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("Okay, let's continue."))], runner_script=[["—"]])
+
+    async def body():
+        c = await Client(cfg).connect()
+        await c.send({"type": "set_session_options", "assist": False})
+        await c.send({"type": "start_session", "name": "S"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        await c.audio(frames(SPEECH, Channel.SYSTEM))
+        await c.expect(typ("line"))
+        await c.send({"type": "suggest", "id": "r1"})
+        await c.expect(typ("suggestion_done"))
+        qa = cfg.sessions_dir / st["session_id"] / "qa.md"
+        assert not qa.exists() or "Suggested reply" not in qa.read_text(encoding="utf-8")
+        await c.close()
+
+    asyncio.run(run_with(svc, body))
+
+
+@pytest.mark.parametrize("text", ["what are you working on?", "Роман, що ти зробив?", "дай апдейт по задачі",
+                                  "is it merged?"])
+def test_work_questions_may_use_connectors(text):
+    from ontrack.connectors import needs_connectors
+
+    assert needs_connectors(text)

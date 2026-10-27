@@ -421,3 +421,23 @@ final class ReplyWordTests: XCTestCase {
         XCTAssertFalse(s.asking)
     }
 }
+
+final class EndCardRecoveryTests: XCTestCase {
+    func testUndecidedSessionCanAlwaysBeBroughtBack() {
+        var s = OverlayState()
+        reduce(&s, .engine(.status(EngineStatus(state: "recording", modelReady: true, sessionId: "s1", degraded: false))))
+        reduce(&s, .engine(.sessionStopped(sessionId: "s1", durationS: 300, lineCount: 40)))
+        XCTAssertEqual(s.mode, .endCard)
+        reduce(&s, .toggle)  // ⌥Space hides it by accident
+        XCTAssertEqual(s.mode, .hidden)
+        reduce(&s, .showEndCard)  // e.g. ⌥⇧S pressed: the card comes back instead of a new session
+        XCTAssertEqual(s.mode, .endCard)
+        reduce(&s, .toggle)
+        reduce(&s, .toggle)  // ⌥Space again also brings it back
+        XCTAssertEqual(s.mode, .endCard)
+        reduce(&s, .choose(.saveAll))
+        reduce(&s, .toggle)
+        reduce(&s, .showEndCard)
+        XCTAssertEqual(s.mode, .finalizing)  // while saving: the progress, never the choice again
+    }
+}

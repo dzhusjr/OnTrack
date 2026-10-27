@@ -61,9 +61,15 @@ def transcript_tail(session_dir: Path, lines: int) -> str:
     return "\n".join(body[-lines:])
 
 
+NOTHING = "—"  # the model's way to say "nothing useful": shown as no suggestion at all
+
 _RULES = (
     "Output ONLY the words {me} will say — no intro, no labels, never address {me}, never use placeholders "
     "or brackets like [task]. Never invent facts.\n"
+    "ONLY concrete, useful content: facts from <my_recent_work>, his files, git or connected tools (tickets, "
+    "statuses, numbers, names, dates, decisions), or specific details from the talk. NO generic filler, soft "
+    "skills, pleasantries or obvious lines (\"let's go over these tickets\", \"good question\", \"I'll look "
+    "into it\", \"let's sync\"). If you have nothing concrete and useful, output exactly: " + NOTHING + "\n"
     "If it is about his work or status (what he did, progress, plans, blockers), answer concretely from "
     "<my_recent_work> (rephrase commit messages as natural speech; mention 1–3 main things). If nothing relevant "
     "is known, give a short honest reply without made-up details.\n"
@@ -102,7 +108,7 @@ def build_suggest_prompt(tail: str, trigger: str, me: str, project: str | None, 
         f"You are {me}'s live meeting / interview helper. Someone just addressed {me}:\n"
         f"\"{trigger.strip()}\"\n\n"
         f"Write what {me} says back, in first person. At most 2 short sentences, or a short answer plus up to "
-        "2 short bullets. If the line needs no reply, answer just: —\n"
+        "2 short bullets. If the line needs no reply, answer just: " + NOTHING + "\n"
         + _context(tail, me, project, work, style, connectors, latest)
     )
 
@@ -116,8 +122,8 @@ def build_reply_prompt(tail: str, me: str, project: str | None, work: str = "", 
         "- If they contain a question (to him or to the group; it may be split over two lines): first the direct "
         "short answer, "
         "then at most 2 short bullets of detail, only if they really help.\n"
-        "- If there was no question: one thing really worth saying now — a point, a suggestion, or a sharp question "
-        f"{me} could ask.\n"
+        "- If there was no question: only a concrete fact, update or risk from his work or connected tools that "
+        "matters to this talk right now. Otherwise output exactly: " + NOTHING + "\n"
         "First person, max 50 words total.\n"
         + _context(tail, me, project, work, style, connectors, latest)
     )
@@ -137,7 +143,8 @@ def build_interview_prompt(tail: str, me: str, style: str = "", latest: str = ""
         "works on something else; never mention his current projects unless the question asks about them. "
         "Don't invent employers, numbers or past events.\n"
         "Format: the direct short answer first (one sentence), then at most 2 short bullets of detail if they help. "
-        "Max 60 words. If the latest lines contain no question, give one sharp, relevant question he could ask.\n"
+        "Technical substance only — no soft skills, no filler (\"great question\", \"it depends\" without the answer). "
+        "Max 60 words. If the latest lines contain no question, output exactly: " + NOTHING + "\n"
         "Output ONLY the words he will say — no intro, no labels, never address him, no placeholders.\n"
         + style +
         "The transcript is live speech recognition: silently read through misheard words.\n"

@@ -225,6 +225,13 @@ struct OverlayView: View {
                         .foregroundStyle(card.confirmDiscard ? .red : .secondary)
                 }
                 .controlSize(.regular)
+                if let label = store.projectSaveLabel {
+                    Toggle(isOn: Binding(get: { store.saveToProject },
+                                         set: { store.saveToProject = $0; store.onSaveToProjectChanged?($0) })) {
+                        Text("Also save to \(label)").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .toggleStyle(.checkbox)
+                }
             }
         }
     }

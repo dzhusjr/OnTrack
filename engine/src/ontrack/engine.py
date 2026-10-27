@@ -673,8 +673,10 @@ class EngineService:
                     parts.append(chunk)
                     self.send({"type": "suggestion_delta", "id": sid, "text": chunk})
                 reply = "".join(parts).strip()
+                if reply.strip(" .—-–") == "":
+                    reply = ""  # "nothing useful to say": nothing is shown or saved
                 self._answered_seq = max(self._answered_seq, upto)  # the next Reply moves on to newer lines
-                if reply and reply != "—":
+                if reply:
                     with open(session_dir / "qa.md", "a", encoding="utf-8") as f:
                         f.write(f"## Suggested reply ({datetime.now():%H:%M}) to: {said.strip()}\n\n{reply}\n\n")
             except LlmError as e:

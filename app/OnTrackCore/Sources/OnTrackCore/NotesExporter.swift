@@ -8,6 +8,13 @@ public enum NotesExporter {
 
     /// Copies `*.md` from `notesDir` into `parent/<session id>/`, replacing older copies. Returns the destination.
     @discardableResult
+    /// "<project>/Meetings/2026-10-27": where a session is also saved inside the work folder.
+    public static func meetingsFolder(project: URL, date: Date, calendar: Calendar = .current) -> URL {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        let day = String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        return project.appendingPathComponent("Meetings", isDirectory: true).appendingPathComponent(day, isDirectory: true)
+    }
+
     public static func export(notesDir: URL, into parent: URL, fileManager fm: FileManager = .default) throws -> URL {
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: notesDir.path, isDirectory: &isDir), isDir.boolValue else {

@@ -137,6 +137,7 @@ public enum OverlayEvent: Equatable {
     case hide
     case toggleLive
     case togglePause
+    case showEndCard  // bring back the save card / progress of a session that isn't saved yet
     case requestSuggestion(id: String)
     case dismissSuggestion
     case deferredUntilPower
@@ -195,6 +196,8 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         return [.suggest(id: id)]
     case .dismissSuggestion:
         s.suggestion = nil
+    case .showEndCard:
+        if s.progress != nil { s.mode = .finalizing } else if s.endCard != nil { s.mode = .endCard }
     case .togglePause:
         guard s.recording else { return [] }
         s.paused.toggle()
@@ -306,7 +309,10 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         guard s.suggestion?.id == id else { return [] }
         s.suggestion?.done = true
         let t = s.suggestion?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if t.isEmpty || t == "—" || t == "-" { s.suggestion = nil }  // nothing worth saying
+        if t.trimmingCharacters(in: CharacterSet(charactersIn: " .—-–")).isEmpty {  // nothing useful to say
+            s.suggestion = nil
+            if !id.hasPrefix("auto-") { s.toast = "Nothing useful to add right now" }  // you pressed Reply
+        }
     case let .enrollDone(score):
         s.toast = String(format: "Voiceprint saved (match %.2f)", score)
     case let .error(err):

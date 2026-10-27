@@ -14,6 +14,11 @@ final class OverlayStore: ObservableObject {
 
     var onLiveToggled: ((Bool) -> Void)?  // user flipped live transcription (overlay, menu, hotkey)
 
+    /// "Work/Meetings/2026-10-27" when a project folder is set (shown as a checkbox on the save card).
+    @Published var projectSaveLabel: String?
+    @Published var saveToProject = false
+    var onSaveToProjectChanged: ((Bool) -> Void)?
+
     init(maxLines: Int, autoShow: Bool = true, live: Bool = true) {
         var s = OverlayState(maxLines: maxLines)
         s.autoShow = autoShow
