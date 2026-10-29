@@ -539,3 +539,52 @@ def test_set_paused_when_idle_is_harmless(dirs):
         await c.close()
 
     asyncio.run(run_with(svc, body))
+
+
+def test_finish_later_survives_restart_and_keeps_save_choice(dirs):
+    import json
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    svc, cfg = make_service(dirs, [({"en": 1}, tr("hello"))])
+    class BlockingDiarizer:
+        def diarize(self, samples):
+            entered.set()
+            assert release.wait(5)
+            return []
+    svc.diarizer = BlockingDiarizer()
+    session_id = None
+
+    async def pause():
+        nonlocal session_id
+        c = await Client(cfg).connect()
+        await c.send({"type": "start_session", "name": "Finish later"})
+        st = await c.expect(lambda m: m["type"] == "status" and m["state"] == "recording")
+        session_id = st["session_id"]
+        await c.audio(frames(SPEECH, Channel.MIC))
+        await c.expect(typ("line"))
+        await c.send({"type": "stop_session"})
+        await c.expect(typ("session_stopped"))
+        await c.send({"type": "finalize", "session_id": session_id, "action": "transcript_only"})
+        assert await asyncio.to_thread(entered.wait, 5)
+        await c.send({"type": "defer_processing", "session_id": session_id})
+        await c.expect(lambda m: m["type"] == "finalize_progress" and m["stage"] == "deferring")
+        release.set()
+        await c.expect(typ("processing_deferred"))
+        await c.expect(lambda m: m["type"] == "status" and m["state"] == "idle")
+        assert json.loads((cfg.sessions_dir / session_id / ".pending_processing").read_text())["action"] == "transcript_only"
+        assert list((cfg.app_support_dir / "audio" / session_id).glob("*.flac"))
+        assert not (cfg.notes_dir / session_id).exists()
+        await c.close()
+    asyncio.run(run_with(svc, pause))
+    restarted, _ = make_service(dirs)
+    async def resume():
+        c = await Client(cfg).connect()
+        await c.send({"type": "continue_processing", "session_id": session_id})
+        done = await c.expect(typ("finalize_done"))
+        notes = Path(done["notes_path"])
+        assert (notes / "transcript.md").exists()
+        assert not (notes / "summary.md").exists()
+        assert not (cfg.sessions_dir / session_id / ".pending_processing").exists()
+        assert not (cfg.app_support_dir / "audio" / session_id).exists()
+        await c.close()
+    asyncio.run(run_with(restarted, resume))

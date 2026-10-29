@@ -22,6 +22,21 @@ ACTIONS = ("save_all", "transcript_only", "discard")
 SESSION_ID_FILE = ".session_id"  # in each notes folder: which session (and kept audio) it came from
 
 
+class ProcessingDeferred(Exception):
+    """Stop at a safe boundary, keeping the recording for a later retry."""
+
+
+class InterruptibleTranscriber:
+    def __init__(self, transcriber, check):
+        self.transcriber, self.check = transcriber, check
+
+    def transcribe(self, utterance):
+        self.check()
+        result = self.transcriber.transcribe(utterance)
+        self.check()
+        return result
+
+
 @dataclass
 class FinalizeDeps:
     diarizer: object
@@ -32,6 +47,11 @@ class FinalizeDeps:
     cfg: Config
     vad_factory: object | None = None  # for transcribing stretches where live transcription was paused
     projects: tuple[str, ...] = ()  # project names under the session's work folder (for the session title)
+    cancelled: Callable[[], bool] = lambda: False
+
+    def check_cancelled(self):
+        if self.cancelled():
+            raise ProcessingDeferred()
 
 
 def _copy_if(src: Path, dst: Path) -> None:
@@ -60,10 +80,12 @@ def finalize(
         progress("done", 1.0)
         return None
 
+    deps.check_cancelled()
     heavy = improve or bool(paused_ranges(session_dir))
     if heavy:
         _postprocess(session_dir, audio_dir, deps, progress, on_warning)
 
+    deps.check_cancelled()
     notes = deps.cfg.notes_dir / session_dir.name
     notes.mkdir(parents=True, exist_ok=True)
     if action == "save_all":
@@ -88,6 +110,8 @@ def finalize(
     _copy_if(session_dir / "notes.md", notes / "notes.md")
     (notes / ".pending_sync").touch()
     (notes / SESSION_ID_FILE).write_text(session_dir.name, encoding="utf-8")
+    deps.check_cancelled()
+    (session_dir / ".pending_processing").unlink(missing_ok=True)
     if heavy:
         delete_audio(audio_dir)  # otherwise kept for "Improve Transcript" later
     progress("done", 1.0)
@@ -95,10 +119,18 @@ def finalize(
 
 
 def _postprocess(session_dir: Path, audio_dir: Path, deps: FinalizeDeps, progress, on_warning) -> None:
+    def report(stage, pct):
+        deps.check_cancelled()
+        progress(stage, 0.05 + 0.6 * pct)
+
+    transcriber = InterruptibleTranscriber(deps.transcriber, deps.check_cancelled) if deps.transcriber else None
     try:
-        postprocess(session_dir, audio_dir, deps.diarizer, deps.embedder, deps.voiceprint, deps.transcriber,
-                    deps.cfg, progress=lambda s, p: progress(s, 0.05 + 0.6 * p), on_warning=on_warning,
+        deps.check_cancelled()
+        postprocess(session_dir, audio_dir, deps.diarizer, deps.embedder, deps.voiceprint, transcriber,
+                    deps.cfg, progress=report, on_warning=on_warning,
                     vad_factory=deps.vad_factory)
+    except ProcessingDeferred:
+        raise
     except Exception as e:  # never lose the transcript because post-processing broke
         log.exception("post-processing failed: %s", e)
 
@@ -114,6 +146,8 @@ def improve_saved(session_dir: Path, audio_dir: Path, notes: Path, deps: Finaliz
     final = session_dir / "transcript.final.md"
     shutil.copyfile(final if final.exists() else session_dir / "transcript.md", notes / "transcript.md")
     (notes / ".pending_sync").touch()
+    deps.check_cancelled()
+    (session_dir / ".pending_processing").unlink(missing_ok=True)
     delete_audio(audio_dir)
     progress("done", 1.0)
     return notes

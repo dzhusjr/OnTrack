@@ -62,6 +62,7 @@ public enum Inbound: Equatable, Sendable {
     case answerDone(id: String)
     case sessionStopped(sessionId: String, durationS: Double, lineCount: Int)
     case finalizeProgress(sessionId: String, stage: String, pct: Double)
+    case processingDeferred(sessionId: String)
     case finalizeDone(sessionId: String, notesPath: String)
     case enrollDone(score: Double)
     case addressed(sessionId: String, seq: Int, reason: String, text: String)  // someone said your name / asked you
@@ -127,6 +128,7 @@ public enum Inbound: Equatable, Sendable {
             return .sessionStopped(sessionId: try need(r.session_id), durationS: r.duration_s ?? 0, lineCount: r.line_count ?? 0)
         case "finalize_progress":
             return .finalizeProgress(sessionId: try need(r.session_id), stage: try need(r.stage), pct: r.pct ?? 0)
+        case "processing_deferred": return .processingDeferred(sessionId: try need(r.session_id))
         case "finalize_done": return .finalizeDone(sessionId: try need(r.session_id), notesPath: r.notes_path ?? "")
         case "enroll_done": return .enrollDone(score: try need(r.score))
         case "addressed":
@@ -184,11 +186,13 @@ public enum Outbound: Equatable, Sendable {
     case suggest(id: String)
     case askAbout(id: String, question: String, sessionId: String)  // a saved session (Notes window)
     case finalizeLight(sessionId: String, action: FinalizeAction)  // keep the live transcript + audio (no heavy pass)
+    case deferProcessing(sessionId: String)
+    case continueProcessing(sessionId: String)
     case improve(sessionId: String)  // later: accurate re-transcription of a saved session from its kept audio
 
     public static let typeNames: Set<String> = [
         "ping", "start_session", "stop_session", "ask", "finalize", "retry_summary", "enroll_start", "set_config",
-        "set_live", "set_paused", "set_session_options", "suggest", "improve",
+        "set_live", "set_paused", "set_session_options", "suggest", "improve", "defer_processing", "continue_processing",
     ]
 
     public var jsonObject: [String: Any] {
@@ -210,6 +214,8 @@ public enum Outbound: Equatable, Sendable {
         case let .askAbout(id, q, sid): return ["type": "ask", "id": id, "question": q, "session_id": sid]
         case let .finalizeLight(sid, action):
             return ["type": "finalize", "session_id": sid, "action": action.rawValue, "improve": false]
+        case let .deferProcessing(sid): return ["type": "defer_processing", "session_id": sid]
+        case let .continueProcessing(sid): return ["type": "continue_processing", "session_id": sid]
         case let .improve(sid): return ["type": "improve", "session_id": sid]
         }
     }

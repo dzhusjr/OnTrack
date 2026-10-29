@@ -14,6 +14,9 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "ask": ("id", "question"),  # optional session_id: ask about a saved session (Notes window)
     "finalize": ("session_id", "action"),  # optional improve: false = keep the live transcript (light)
     "retry_summary": ("session_id",),
+    "defer_processing": ("session_id",),
+    "continue_processing": ("session_id",),
+    "processing_deferred": ("session_id",),
     "improve": ("session_id",),  # re-transcribe a saved session from its kept audio (accurate model + speakers)
     "enroll_start": (),
     "set_config": ("config",),

@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import concurrent.futures
 import logging
+import json
 import logging.handlers
 import os
 import queue
@@ -20,7 +21,7 @@ import numpy as np
 from .audio_source import FrameDecoder
 from .config import Config, apply_overrides, load_config
 from .control import NdjsonDecoder, ProtocolError, encode, validate
-from .finalize import FinalizeDeps, finalize, improve_saved, notes_dir_for, retry_summary
+from .finalize import FinalizeDeps, ProcessingDeferred, finalize, improve_saved, notes_dir_for, retry_summary
 from .llm import ClaudeRunner, LlmError
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .assist import (address_reason, build_interview_prompt, build_reply_prompt, build_suggest_prompt, name_regex,
@@ -116,6 +117,7 @@ class EngineService:
         self._stopping: asyncio.Event | None = None
         self._socket_inodes: dict[Path, int] = {}
         self._finalizing: set[str] = set()
+        self._defer_processing: dict[str, threading.Event] = {}
         self._resume_last_s: float | None = None
         self.dropped_frames = 0
         self._dropping_since: float | None = None
@@ -272,6 +274,22 @@ class EngineService:
             self._ask(msg["id"], msg["question"], msg.get("session_id"))
         elif t == "finalize":
             self._finalize(msg["session_id"], msg["action"], bool(msg.get("improve", True)))
+        elif t == "defer_processing":
+            sid = msg["session_id"]
+            if sid in self._defer_processing:
+                self._defer_processing[sid].set()
+                self._send_now({"type": "finalize_progress", "session_id": sid, "stage": "deferring", "pct": 0})
+        elif t == "continue_processing":
+            folder = self._valid_session(msg["session_id"])
+            if folder is None:
+                self._send_now(self._error("no_session", "Recording not found."))
+            else:
+                marker = folder / ".pending_processing"
+                options = json.loads(marker.read_text()) if marker.exists() else {}
+                if options.get("mode") == "improve":
+                    self._improve(msg["session_id"])
+                else:
+                    self._finalize(msg["session_id"], options.get("action", "save_all"), options.get("improve", True))
         elif t == "improve":
             self._improve(msg["session_id"])
         elif t == "retry_summary":
@@ -765,9 +783,13 @@ class EngineService:
             self._send_now(self._error("busy", "That session is already being processed."))
             return
         self._finalizing.add(session_id)
+        cancel = threading.Event()
+        self._defer_processing[session_id] = cancel
         if self.state == "idle":
             self._set_state("postprocessing")
         notes, deps = notes_dir_for(self.cfg.notes_dir, session_id), self._finalize_deps()
+        deps.cancelled = cancel.is_set
+        (session_dir / ".pending_processing").write_text(json.dumps({"mode": "improve"}))
 
         def job() -> None:
             try:
@@ -776,10 +798,13 @@ class EngineService:
                                                                   "stage": stage, "pct": round(pct, 3)}),
                                     on_warning=lambda text: self.send(self._error("diarization_unavailable", text)))
                 self.send({"type": "finalize_done", "session_id": session_id, "notes_path": str(out)})
+            except ProcessingDeferred:
+                self.send({"type": "processing_deferred", "session_id": session_id})
             except Exception as e:
                 log.exception("improve failed")
                 self.send(self._error("finalize_failed", str(e)))
             finally:
+                self._defer_processing.pop(session_id, None)
                 self._finalizing.discard(session_id)
                 self._call(self._finalize_finished)
 
@@ -795,9 +820,14 @@ class EngineService:
             self._send_now(self._error("busy", "That session is still recording or already being saved."))
             return
         self._finalizing.add(session_id)
+        cancel = threading.Event()
+        self._defer_processing[session_id] = cancel
         if self.state == "idle":
             self._set_state("postprocessing")
         deps = self._finalize_deps()
+        deps.cancelled = cancel.is_set
+        if action != "discard":
+            (session_dir / ".pending_processing").write_text(json.dumps({"mode": "finalize", "action": action, "improve": improve}))
 
         def job() -> None:
             try:
@@ -813,10 +843,13 @@ class EngineService:
                 if action == "discard" and self.last_session == session_dir:
                     self.last_session = None
                 self.send({"type": "finalize_done", "session_id": session_id, "notes_path": str(notes) if notes else ""})
+            except ProcessingDeferred:
+                self.send({"type": "processing_deferred", "session_id": session_id})
             except Exception as e:
                 log.exception("finalize failed")
                 self.send(self._error("finalize_failed", str(e)))
             finally:
+                self._defer_processing.pop(session_id, None)
                 self._finalizing.discard(session_id)
                 self._call(self._finalize_finished)
 

@@ -140,6 +140,8 @@ public enum OverlayEvent: Equatable {
     case showEndCard  // bring back the save card / progress of a session that isn't saved yet
     case requestSuggestion(id: String)
     case dismissSuggestion
+    case finishLater
+    case continueProcessing(String)
     case deferredUntilPower
     case choose(FinalizeAction)
     case dismiss
@@ -184,6 +186,15 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
     case .escape:
         if s.mode == .collapsed { s.mode = .hidden } else if s.mode == .expanded { s.mode = .collapsed }
         if s.endCard?.confirmDiscard == true { s.endCard?.confirmDiscard = false }
+    case .finishLater:
+        guard let sid = s.sessionId ?? s.endCard?.sessionId, s.progress != nil else { return [] }
+        s.progress = FinalizeProgress(stage: "deferring", pct: 0)
+        return [.deferProcessing(sessionId: sid)]
+    case let .continueProcessing(sid):
+        s.sessionId = sid
+        s.progress = FinalizeProgress(stage: "starting", pct: 0)
+        s.mode = .finalizing
+        return [.continueProcessing(sessionId: sid)]
     case .deferredUntilPower:
         s.endCard = nil
         s.progress = nil
@@ -283,6 +294,11 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         s.mode = .endCard
     case let .finalizeProgress(_, stage, pct):
         s.progress = FinalizeProgress(stage: stage, pct: pct)
+    case .processingDeferred:
+        s.progress = nil
+        s.endCard = nil
+        s.mode = s.recording ? .collapsed : .hidden
+        s.toast = "Recording kept — continue from Pending transcription in Notes"
     case let .finalizeDone(sid, path):
         if s.recording, sid != s.sessionId {  // previous session finished saving while a new one records
             if !path.isEmpty { s.toast = "Previous session saved to notes" }

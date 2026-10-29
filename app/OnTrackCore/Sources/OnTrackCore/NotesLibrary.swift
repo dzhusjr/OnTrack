@@ -23,6 +23,7 @@ public struct NoteSession: Identifiable, Equatable, Sendable {
     public let date: Date?
     public let kinds: [Kind]
     public let modified: Date
+    public var pendingTranscription = false
     public var sessionId: String = ""  // the recording it came from (folder may have been renamed)
 
     public func file(_ kind: Kind) -> URL { folder.appendingPathComponent(kind.fileName) }
@@ -63,6 +64,29 @@ public enum NotesLibrary {
             case (nil, nil): return (a.modified, a.id) > (b.modified, b.id)
             }
         }
+    }
+
+    /// Recordings interrupted before saving, or explicitly left for later. Audio is the source of truth.
+    public static func pending(sessionsDir: URL, audioDir: URL, saved: [NoteSession],
+                               excluding activeId: String? = nil) -> [NoteSession] {
+        let fm = FileManager.default
+        let folders = (try? fm.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil)) ?? []
+        let savedIds = Set(saved.map(\.sessionId))
+        return folders.compactMap { folder -> NoteSession? in
+            let id = folder.lastPathComponent
+            guard id != activeId, fm.fileExists(atPath: audioDir.appendingPathComponent(id).path),
+                  let data = try? Data(contentsOf: folder.appendingPathComponent("meta.json")),
+                  let meta = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  !savedIds.contains(id) || fm.fileExists(atPath: folder.appendingPathComponent(".pending_processing").path)
+            else { return nil }
+            let kinds = NoteSession.Kind.allCases.filter { fm.fileExists(atPath: folder.appendingPathComponent($0.fileName).path) }
+            var session = NoteSession(id: id, folder: folder, title: meta["name"] as? String ?? fallbackTitle(id),
+                                      date: date(fromId: id), kinds: kinds,
+                                      modified: date(fromId: id) ?? .distantPast)
+            session.sessionId = id
+            session.pendingTranscription = true
+            return session
+        }.sorted { $0.modified > $1.modified }
     }
 
     /// "2026-10-24-2216-session-22-16" → 2026-10-24 22:16 local time.

@@ -22,6 +22,9 @@ Run after `scripts/dev.sh all` (and `scripts/dev.sh doctor` shows no ✗). Tick 
 - [ ] Zoom/Meet volume is not ducked while OnTrack listens.
 
 ## Robustness
+- [ ] During transcription choose **Finish later**: after the current processing step, processing stops and audio stays on disk. Quit/reopen OnTrack, open Notes → **Pending transcription**, then **Continue transcription**; the original save choice is honored. Interrupted jobs also appear here after a restart.
+- [ ] Drag the overlay by its top handle near the display's top center: it snaps during the drag to its default position, 24 pt below the usable top edge. Keep dragging more than 24 pt: it pulls free and follows the original cursor offset without immediately re-snapping. Leave the zone and re-enter to snap again. Release: it stays there. A click without dragging does not snap.
+- [ ] Drag onto another display and snap there; reopen OnTrack and confirm the snapped position is remembered.
 - [ ] `pkill -9 -f ontrack-engine` mid-session → overlay shows "reconnecting…", then continues within 5 s; transcript.md has no duplicated or lost lines (≤ 10 s gap noted as `[gap …]`).
 - [ ] Unplug/plug AirPods mid-session → capture continues.
 - [ ] Rename `claude` temporarily (or log out) → asking shows an error; ending the session still saves the transcript and `summary_pending`; menu → Retry Summary works after fixing.

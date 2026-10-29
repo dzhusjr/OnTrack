@@ -37,6 +37,11 @@ struct OverlayView: View {
         .background(OverlayBackground())
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
+        .overlay(alignment: .top) {
+            // Use the existing top padding as a drag area, clear of buttons and selectable text.
+            OverlayDragHandle()
+                .frame(height: 14)
+        }
         .onExitCommand { store.send(.escape) }
         .onChange(of: s.mode) { _, mode in questionFocused = (mode == .expanded) }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: s.lines)
@@ -240,6 +245,9 @@ struct OverlayView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(Self.stageTitle(s.progress?.stage)).font(.system(size: 13, weight: .medium))
             ProgressView(value: s.progress?.pct ?? 0).progressViewStyle(.linear)
+            Button("Finish later") { store.send(.finishLater) }
+                .disabled(s.progress?.stage == "deferring")
+                .help("Keep this recording in Pending transcription in Notes")
         }
     }
 
@@ -298,11 +306,54 @@ struct OverlayView: View {
 
     static func stageTitle(_ stage: String?) -> String {
         switch stage {
+        case "deferring": return "Stopping after the current step…"
         case "separating": return "Separating speakers…"
         case "retranscribing": return "Writing the accurate transcript…"
         case "summarizing": return "Summarizing…"
         case "saving", "done": return "Saving…"
         default: return "Preparing…"
+        }
+    }
+}
+
+/// SwiftUI's hosting view can consume background mouse events, so provide an explicit native drag area.
+private struct OverlayDragHandle: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragView {
+        let view = DragView()
+        view.toolTip = "Drag near the top center to snap. Keep dragging to pull free."
+        return view
+    }
+
+    func updateNSView(_ view: DragView, context: Context) {}
+
+    final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            (window as? OverlayPanel)?.beginHandleDrag(with: event)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            NSCursor.closedHand.set()
+            (window as? OverlayPanel)?.continueHandleDrag(with: event)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            (window as? OverlayPanel)?.endHandleDrag()
+            NSCursor.openHand.set()
+        }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .openHand)
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.secondaryLabelColor.setFill()
+            NSBezierPath(roundedRect: NSRect(x: bounds.midX - 14, y: bounds.midY - 1.5,
+                                            width: 28, height: 3),
+                         xRadius: 1.5, yRadius: 1.5).fill()
         }
     }
 }

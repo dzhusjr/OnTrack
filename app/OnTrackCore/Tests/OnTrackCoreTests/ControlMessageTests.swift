@@ -17,7 +17,7 @@ final class ControlMessageTests: XCTestCase {
             if case .unknown = msg { XCTFail("unknown: \(type)") }
             decoded += 1
         }
-        XCTAssertEqual(decoded, 14)
+        XCTAssertEqual(decoded, 15)
     }
 
     func testOutboundEncodingMatchesGolden() throws {
@@ -37,6 +37,8 @@ final class ControlMessageTests: XCTestCase {
                                                                      names: ["Alex", "Олекса"], connectors: false)),
             "suggest": .suggest(id: "s1"),
             "improve": .improve(sessionId: "2026-10-23-1405-linear-algebra"),
+            "defer_processing": .deferProcessing(sessionId: "2026-10-23-1405-linear-algebra"),
+            "continue_processing": .continueProcessing(sessionId: "2026-10-23-1405-linear-algebra"),
         ]
         var seen = 0
         for line in try goldenLines() {

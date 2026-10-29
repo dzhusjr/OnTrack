@@ -21,6 +21,13 @@ final class NotesBrowserModel: ObservableObject {
     var ask: ((_ id: String, _ question: String, _ sessionId: String) -> Void)?
     var onImprove: ((String) -> Void)?
     var audioDir: URL?
+    var sessionsDir: URL?
+    var onContinue: ((String) -> Void)?
+    var onFinishLater: ((String) -> Void)?
+    @Published var processingId: String?
+    @Published var stopping = false
+    @Published private var recordingId: String?
+    var isRecording: Bool { recordingId != nil }
 
     /// The recording's audio is still kept (saved without the heavy pass) → it can be improved.
     func canImprove(_ s: NoteSession) -> Bool {
@@ -29,6 +36,17 @@ final class NotesBrowserModel: ObservableObject {
     }
 
     init(notesDir: URL) { self.notesDir = notesDir }
+
+    func continueTranscription(_ session: NoteSession) {
+        guard processingId == nil, !isRecording else { return }
+        processingId = session.sessionId
+        onContinue?(session.sessionId)
+    }
+
+    func finishLater(_ session: NoteSession) {
+        stopping = true
+        onFinishLater?(session.sessionId)
+    }
 
     func submit() {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -42,6 +60,20 @@ final class NotesBrowserModel: ObservableObject {
     /// Engine answers for questions asked here (ids start with "notes-").
     func receive(_ msg: Inbound) {
         switch msg {
+        case let .status(status):
+            recordingId = status.state == "recording" ? status.sessionId : nil
+        case let .finalizeProgress(sid, stage, _):
+            let changed = processingId != sid
+            processingId = sid
+            stopping = stage == "deferring"
+            if changed { reload() }
+        case .processingDeferred, .finalizeDone:
+            processingId = nil
+            stopping = false
+            reload()
+        case .error:
+            processingId = nil
+            stopping = false
         case let .answerDelta(id, text) where id == pending?.id:
             pending?.answer += text
         case let .answerDone(id) where id == pending?.id:
@@ -60,7 +92,12 @@ final class NotesBrowserModel: ObservableObject {
     var selected: NoteSession? { sessions.first { $0.id == selection } }
 
     func reload() {
-        sessions = NotesLibrary.scan(notesDir)
+        let saved = NotesLibrary.scan(notesDir)
+        let unfinished = sessionsDir.flatMap { dir in
+            audioDir.map { NotesLibrary.pending(sessionsDir: dir, audioDir: $0, saved: saved, excluding: recordingId) }
+        } ?? []
+        let ids = Set(unfinished.map(\.sessionId))
+        sessions = unfinished + saved.filter { !ids.contains($0.sessionId) }
         if selected == nil { selection = sessions.first?.id }
         fixKind()
     }
@@ -104,6 +141,19 @@ final class NotesWindowController: NSObject, NSWindowDelegate {
     var audioDir: URL? {
         get { model.audioDir }
         set { model.audioDir = newValue }
+    }
+
+    var sessionsDir: URL? {
+        get { model.sessionsDir }
+        set { model.sessionsDir = newValue }
+    }
+    var onContinue: ((String) -> Void)? {
+        get { model.onContinue }
+        set { model.onContinue = newValue }
+    }
+    var onFinishLater: ((String) -> Void)? {
+        get { model.onFinishLater }
+        set { model.onFinishLater = newValue }
     }
 
     func show(sessionId: String? = nil) {
@@ -199,7 +249,8 @@ struct NotesBrowserView: View {
         var map: [String: [NoteSession]] = [:]
         for s in sessions {
             let title: String
-            if let d = s.date {
+            if s.pendingTranscription { title = "Pending transcription" }
+            else if let d = s.date {
                 if cal.isDateInToday(d) { title = "Today" }
                 else if cal.isDateInYesterday(d) { title = "Yesterday" }
                 else { title = d.formatted(.dateTime.weekday(.wide).day().month(.wide).year()) }
@@ -223,7 +274,7 @@ private struct SessionRow: View {
                 if let d = session.date {
                     Text(d.formatted(date: .omitted, time: .shortened))
                 }
-                Text(session.kinds.map(\.title).joined(separator: " · "))
+                Text(session.pendingTranscription ? "Recording kept · finish later" : session.kinds.map(\.title).joined(separator: " · "))
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -241,7 +292,29 @@ private struct NoteDetailView: View {
         let kind = session.kinds.contains(model.kind) ? model.kind : (session.kinds.first ?? .summary)
         let md = model.markdown(session, kind)
         MarkdownWebView(html: NotesPage.html(body: Markdown.html(md), kind: kind), baseURL: session.folder)
-            .safeAreaInset(edge: .bottom, spacing: 0) { NotesAskBar(model: model, session: session) }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if session.pendingTranscription {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.processingId == session.sessionId ? (model.stopping ? "Stopping after the current step…" : "Transcribing…") : "Pending transcription")
+                                .font(.headline)
+                            Text("Your recording is kept. You can quit OnTrack and finish it later.")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if model.processingId == session.sessionId {
+                            Button("Finish later") { model.finishLater(session) }.disabled(model.stopping)
+                        } else {
+                            Button("Continue transcription") { model.continueTranscription(session) }
+                                .disabled(model.processingId != nil || model.isRecording)
+                                .help("Process the saved audio again. Some work may repeat.")
+                        }
+                    }.padding().background(.regularMaterial)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !session.pendingTranscription { NotesAskBar(model: model, session: session) }
+            }
             .navigationTitle(session.title)
             .navigationSubtitle(session.date?.formatted(date: .abbreviated, time: .shortened) ?? session.id)
             .toolbar {
@@ -253,7 +326,7 @@ private struct NoteDetailView: View {
                     .fixedSize()
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
-                    if model.canImprove(session) {
+                    if !session.pendingTranscription && model.canImprove(session) {
                         Button { model.onImprove?(session.sessionId) } label: {
                             Label("Improve Transcript", systemImage: "wand.and.stars")
                         }

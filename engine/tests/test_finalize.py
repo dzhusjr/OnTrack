@@ -112,3 +112,30 @@ def test_light_save_keeps_live_transcript_and_audio_then_improve_later(tmp_path)
         assert (notes / "transcript.md").read_text(encoding="utf-8") == "accurate line\n"
     finally:
         fz.postprocess = real
+
+
+def test_defer_during_transcription_keeps_audio_for_retry(tmp_path):
+    import pytest
+    from ontrack.finalize import ProcessingDeferred
+    w, audio, deps, cfg = setup(tmp_path, [], [({"en": 1}, tr("complete"))])
+    original = deps.transcriber
+    deferred = False
+    class StopAfterUtterance:
+        def transcribe(self, utterance):
+            nonlocal deferred
+            result = original.transcribe(utterance)
+            deferred = True
+            return result
+    deps.transcriber = StopAfterUtterance()
+    deps.cancelled = lambda: deferred
+    marker = w.dir / ".pending_processing"
+    marker.write_text('{"action":"transcript_only"}')
+    with pytest.raises(ProcessingDeferred):
+        finalize(w.dir, audio, "transcript_only", deps, lambda *_: None)
+    assert audio.exists() and marker.exists()
+    assert not (cfg.notes_dir / w.id).exists()
+    deps.cancelled = lambda: False
+    deps.transcriber = None
+    out = finalize(w.dir, audio, "transcript_only", deps, lambda *_: None)
+    assert (out / "transcript.md").exists()
+    assert not marker.exists()

@@ -5,6 +5,10 @@ import SwiftUI
 
 /// Borderless non-activating floating panel: never steals focus unless you are typing a question.
 final class OverlayPanel: NSPanel {
+    var snapTarget: ((NSRect, NSPoint) -> NSPoint?)?
+    var onDragEnded: (() -> Void)?
+    private var dragSession: OverlayDragSession?
+
     init(contentView: NSView) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 80),
                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
@@ -23,6 +27,26 @@ final class OverlayPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    func beginHandleDrag(with event: NSEvent) {
+        dragSession = OverlayDragSession(pointer: NSEvent.mouseLocation, frame: frame)
+    }
+
+    func continueHandleDrag(with event: NSEvent) {
+        guard var session = dragSession else { return }
+        // Screen coordinates remain stable when snapping moves the view under the cursor.
+        let pointer = NSEvent.mouseLocation
+        let top = session.topLeft(at: pointer, height: frame.height) { [self] proposed in
+            snapTarget?(proposed, pointer)
+        }
+        dragSession = session
+        setFrameTopLeftPoint(top)
+    }
+
+    func endHandleDrag() {
+        dragSession = nil
+        onDragEnded?()
+    }
 }
 
 @MainActor
@@ -44,6 +68,8 @@ final class OverlayController: NSObject, NSWindowDelegate {
         panel = OverlayPanel(contentView: hosting.view)
         super.init()
         panel.delegate = self
+        panel.snapTarget = { [weak self] frame, pointer in self?.snapTarget(for: frame, pointer: pointer) }
+        panel.onDragEnded = { [weak self] in self?.savePosition() }
         store.$state
             .removeDuplicates()  // engine pings re-publish identical state every 2 s
             .receive(on: RunLoop.main)
@@ -81,15 +107,22 @@ final class OverlayController: NSObject, NSWindowDelegate {
         if positioned {
             top = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)  // keep the top edge; grow downward
         } else {
-            top = savedTopLeft() ?? defaultTopLeft()
+            top = savedTopLeft() ?? defaultTopLeft(width: size.width)
             positioned = true
         }
         panel.setFrame(NSRect(x: top.x, y: top.y - size.height, width: size.width, height: size.height), display: true)
     }
 
-    private func defaultTopLeft() -> NSPoint {
+    private func defaultTopLeft(width: CGFloat) -> NSPoint {
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        return NSPoint(x: screen.midX - 280, y: screen.maxY - 24)
+        return OverlayPlacement.defaultTopLeft(in: screen, width: width)
+    }
+
+    private func snapTarget(for frame: NSRect, pointer: NSPoint) -> NSPoint? {
+        // Match the destination display, including displays with nonzero/negative origins.
+        let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? panel.screen
+        guard let screen else { return nil }
+        return OverlayPlacement.snapTopLeft(for: frame, screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
     }
 
     private func savedTopLeft() -> NSPoint? {
@@ -100,6 +133,10 @@ final class OverlayController: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        savePosition()
+    }
+
+    private func savePosition() {
         guard positioned else { return }
         UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: panel.frame.minX, y: panel.frame.maxY)), forKey: Self.positionKey)
     }

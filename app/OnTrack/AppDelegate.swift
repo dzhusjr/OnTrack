@@ -27,6 +27,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let w = NotesWindowController(notesDir: settings.notesDir) { [weak self] id, question, sid in
             self?.client.send(.askAbout(id: id, question: question, sessionId: sid))
         }
+        w.sessionsDir = settings.sessionsDir
+        w.onContinue = { [weak self] sid in
+            guard let self else { return }
+            if self.store.state.recording {
+                self.store.showIssue("Finish the current recording before continuing transcription.")
+                return
+            }
+            self.queue.remove(sessionId: sid)
+            self.saveQueue()
+            self.lastFinalizeSessionId = sid
+            self.store.send(.continueProcessing(sid))
+        }
+        w.onFinishLater = { [weak self] sid in self?.deferProcessing(sid) }
         w.audioDir = settings.appSupportDir.appendingPathComponent("audio", isDirectory: true)
         w.onImprove = { [weak self] sid in
             guard let self else { return }
@@ -156,6 +169,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         power.start()
         store.sendToEngine = { [weak self] msg in
             guard let self else { return }
+            if case let .deferProcessing(sid) = msg {
+                self.deferProcessing(sid)
+                return
+            }
             if case let .finalize(sid, action) = msg {
                 self.lastFinalizeSessionId = sid
                 if action != .discard && !self.settings.improveAfterRecording {
@@ -237,10 +254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: engine events
 
     private func handle(_ msg: Inbound) {
+        notesWindow.receive(msg)
         supervisor.noteAlive()  // any message proves the engine is alive, not just pongs
         switch msg {
         case let .answerDelta(id, _) where id.hasPrefix("notes-"), let .answerDone(id) where id.hasPrefix("notes-"):
-            notesWindow.receive(msg)
             return  // a question from the Notes window, not the overlay
         case .pong:
             supervisor.noteAlive()
@@ -265,6 +282,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let sid = processingSessionId, err.code == "finalize_failed" || err.code == "no_session" {
                 queuedSessionFinished(sid)  // don't block the rest of the queue
             }
+        case let .processingDeferred(sid):
+            if sid == processingSessionId {
+                queue.remove(sessionId: sid)
+                saveQueue()
+                processingSessionId = nil
+            }
+            notesWindow.refresh()
         case let .finalizeDone(sid, path):
             if sid == pendingSummarySessionId { pendingSummarySessionId = nil }
             if sid == processingSessionId { queuedSessionFinished(sid) }
@@ -298,6 +322,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: sessions saved on battery
+
+    private func deferProcessing(_ sid: String) {
+        // Persist the user's decision before waiting for the engine's current segment.
+        queue.remove(sessionId: sid)
+        saveQueue()
+        client.send(.deferProcessing(sessionId: sid))
+    }
 
     private func saveQueue() { settings.finalizeQueue = queue.json() }
 
