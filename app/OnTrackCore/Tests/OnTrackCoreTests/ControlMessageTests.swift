@@ -62,10 +62,10 @@ final class ControlMessageTests: XCTestCase {
     }
 
     func testAiStatusDecodesAndToleratesMissingOptionalFields() throws {
-        let raw = #"{"type":"ai_status","state":"ready","mode":"local_only","provider":"ollama","model":"qwen3:4b","installed":["qwen3:4b"],"models":{"quick":"qwen3:4b"},"memory_mb":2400}"#
+        let raw = #"{"type":"ai_status","state":"ready","mode":"local_only","provider":"ollama","model":"qwen3:4b","installed":["qwen3:4b"],"models":{"quick":"qwen3:4b"},"memory_mb":2400,"needs_setup":"model","progress":0.5}"#
         guard case let .aiStatus(s) = try Inbound.decode(Data(raw.utf8)) else { return XCTFail() }
         XCTAssertEqual(s, AiStatus(state: "ready", mode: "local_only", provider: "ollama", model: "qwen3:4b",
-                                   installed: ["qwen3:4b"], models: ["quick": "qwen3:4b"], memoryMB: 2400))
+                                   installed: ["qwen3:4b"], models: ["quick": "qwen3:4b"], memoryMB: 2400, needsSetup: "model", progress: 0.5))
         guard case let .aiStatus(bare) = try Inbound.decode(Data(#"{"type":"ai_status","state":"off","mode":"claude","provider":"mlx"}"#.utf8))
         else { return XCTFail() }
         XCTAssertEqual(bare, AiStatus())

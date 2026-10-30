@@ -415,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The "Load local model" button next to an error: loads the model (never automatic), or opens Settings when
     /// local AI is not chosen yet.
     private func loadLocalModel() {
-        guard settings.aiMode != "claude" else { settingsWindow.show(); return }
+        guard settings.aiMode != "claude", aiStatus.status.needsSetup.isEmpty else { settingsWindow.show(); return }  // Settings has the Install button
         client.send(.localAi(.start))
         store.showToast("Loading the local model. Ask again in a few seconds")
     }

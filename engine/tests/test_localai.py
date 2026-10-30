@@ -313,7 +313,7 @@ def test_mlx_missing_model_error_says_how_to_fix_it_and_never_downloads(monkeypa
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     with pytest.raises(LlmError) as e:
         prov.load("mlx-community/does-not-exist-4bit")
-    assert e.value.code == "local_model_missing" and "hf download" in e.value.message
+    assert e.value.code == "local_model_missing" and "Install" in e.value.message
 
 
 def test_mlx_not_installed_is_reported_without_importing(monkeypatch):
@@ -412,3 +412,65 @@ def test_engine_announces_status_loads_nothing_and_local_only_blocks_claude(dirs
 
     asyncio.run(run_with(svc, body))
     assert svc.runner.prompts == []  # Claude was never asked
+
+
+# ---- one-button install (package + model), separate from loading -----------------------------------
+class SetupProvider(FakeProvider):
+    def __init__(self, missing_pkg=True):
+        super().__init__()
+        self.missing_pkg = missing_pkg
+        self._cache = None
+
+    def available(self):
+        return "not installed" if self.missing_pkg else None
+
+
+def make_install(tmp_path, pkg_missing=True, online=True, fail_download=None):
+    prov = SetupProvider(pkg_missing)
+    calls = []
+
+    def pkg():
+        calls.append("pkg")
+        prov.missing_pkg = False
+
+    def dl(repo, report):
+        calls.append("download")
+        report(0.5, "Downloading… 50%")
+        if fail_download:
+            raise LlmError("local_setup_failed", fail_download)
+
+    cfg = replace(Config(), ai_mode="claude")
+    local = LocalAi(cfg, providers={"mlx": lambda: prov}, install_package_fn=pkg, download_fn=dl,
+                    online_fn=lambda: online)
+    return local, prov, calls
+
+
+def test_install_adds_the_package_and_model_but_never_loads(tmp_path):
+    local, prov, calls = make_install(tmp_path)
+    local.refresh()
+    assert local.needs_setup == "package"
+    local.install()
+    wait_for(local, "off")
+    assert calls == ["pkg", "download"] and prov.loads == []
+    assert "Installed" in local.message and local.progress is None
+
+
+def test_install_without_internet_says_so_and_changes_nothing(tmp_path):
+    local, _, calls = make_install(tmp_path, online=False)
+    local.install()
+    wait_for(local, "error")
+    assert "internet" in local.message.lower() and calls == []
+
+
+def test_install_failure_is_reported(tmp_path):
+    local, _, _ = make_install(tmp_path, pkg_missing=False, fail_download="Downloading x failed: boom")
+    local.install()
+    wait_for(local, "error")
+    assert "boom" in local.message
+
+
+def test_status_reports_needs_setup_and_progress(tmp_path):
+    local, _, _ = make_install(tmp_path)
+    local.refresh()
+    st = local.status()
+    assert st["needs_setup"] == "package" and st["progress"] is None

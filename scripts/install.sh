@@ -28,9 +28,6 @@ if ! command -v claude >/dev/null 2>&1; then
     echo "→ When this script is done, run 'claude' once to log in."
   fi
 fi
-WANT_LOCAL=0
-echo "Optional: a small AI model that runs on this Mac (works offline, uses about 2.5 GB of memory only while loaded)."
-if ask "Set it up too?"; then WANT_LOCAL=1; fi
 
 say "3/5  Hugging Face account (free, one time)"
 if [ -f "$HOME/.cache/huggingface/token" ] || [ -n "${HF_TOKEN:-}" ]; then
@@ -54,13 +51,14 @@ say "4/5  Installing OnTrack (about 5 GB of downloads, 10 to 25 minutes)"
 "$ROOT/scripts/dev.sh" cert
 "$ROOT/scripts/dev.sh" app
 
-if [ "$WANT_LOCAL" = 1 ]; then
-  say "Local AI model"
-  "$ROOT/scripts/dev.sh" local-ai || echo "! Local AI setup did not finish. Run scripts/dev.sh local-ai later."
-fi
-
 say "5/5  Done"
 echo "OnTrack is in your menu bar. Its Permissions card opens on first launch: grant Microphone and System audio,"
 echo "then Enroll My Voice (30 seconds of you talking)."
 echo "Check anything later with: scripts/dev.sh doctor"
+echo
+echo "Optional and separate: a small AI model that runs on this Mac (offline, private, about 2.5 GB download)."
+echo "You can install it any time with one button: OnTrack menu → Settings → Assistant → AI → Install."
+if ask "Install it now instead?"; then
+  "$ROOT/scripts/dev.sh" local-ai || echo "! Not finished. Use the Install button in Settings, or run scripts/dev.sh local-ai later."
+fi
 "$ROOT/scripts/dev.sh" run

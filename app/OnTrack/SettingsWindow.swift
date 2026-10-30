@@ -173,7 +173,7 @@ final class SettingsModel: ObservableObject {
 
     private func aiChanged(refresh: Bool) {
         actions.aiSettingsChanged()
-        if refresh && aiMode != "claude" { actions.localAi(.refresh) }  // lists installed models, loads nothing
+        if refresh { actions.localAi(.refresh) }  // lists installed models and what is missing, loads nothing
     }
 
     func restartEngine() {
@@ -251,7 +251,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         model.reload()
-        if model.aiMode != "claude" { model.actions.localAi(.refresh) }
+        model.actions.localAi(.refresh)  // cheap: checks what is installed, loads nothing
         if window == nil {
             // Native preferences look: tabs as toolbar icons, window titled after the tab.
             let tabs = NSTabViewController()
@@ -381,10 +381,32 @@ private struct AssistantTab: View {
         }
     }
 
+    /// One button installs everything the local model needs. It never loads the model.
+    private var installRow: some View {
+        let busy = ai.status.state == "installing"
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(busy ? "Installing local AI…" : "Local AI is not installed")
+                    Caption(busy ? (ai.status.message.isEmpty ? "This can take a few minutes." : ai.status.message)
+                                 : "Run the model on this Mac, offline and private. About 2.5 GB, downloaded once. Nothing loads until you press Load.")
+                }
+                Spacer()
+                Button("Install") { model.actions.localAi(.install) }.disabled(busy)
+            }
+            if busy {
+                if let p = ai.status.progress { ProgressView(value: p) } else { ProgressView().controlSize(.small) }
+            } else if ai.status.state == "error" && !ai.status.message.isEmpty {
+                Caption(ai.status.message)
+            }
+        }
+    }
+
     private var statusTitle: String {
         switch ai.status.state {
         case "ready": return "Loaded: \(Self.short(ai.status.model))" + (ai.status.memoryMB.map { String(format: " (%.1f GB)", Double($0) / 1000) } ?? "")
         case "loading": return "Loading…"
+        case "installing": return "Installing…"
         case "error": return "Not available"
         default: return "Not loaded"
         }
@@ -393,7 +415,7 @@ private struct AssistantTab: View {
     private var statusIcon: String {
         switch ai.status.state {
         case "ready": return "checkmark.circle.fill"
-        case "loading": return "hourglass"
+        case "loading", "installing": return "hourglass"
         case "error": return "exclamationmark.triangle.fill"
         default: return "circle"
         }
@@ -461,6 +483,9 @@ private struct AssistantTab: View {
                 }
             }
             Section("AI") {
+                if model.localProvider == "mlx" && (!ai.status.needsSetup.isEmpty || ai.status.state == "installing") {
+                    installRow
+                }
                 Picker(selection: $model.aiMode) {
                     Text("Claude").tag("claude")
                     Text("Local first").tag("local_first")
@@ -475,7 +500,7 @@ private struct AssistantTab: View {
                         Text("Ollama").tag("ollama")
                     } label: {
                         Text("Local engine")
-                        Text(model.localProvider == "mlx" ? "Runs inside OnTrack. Needs mlx-lm (scripts/dev.sh local-ai)."
+                        Text(model.localProvider == "mlx" ? "Runs inside OnTrack. Use Install above if it is not set up yet."
                                                           : "Uses the Ollama app on this Mac. Open it first.")
                     }
                     modelPicker("Quick replies", "Live answers and suggested replies.", $model.localQuick, allowEmpty: false)
@@ -491,7 +516,8 @@ private struct AssistantTab: View {
                         if ai.status.state == "ready" {
                             Button("Unload") { model.actions.localAi(.stop) }
                         } else {
-                            Button("Load") { model.actions.localAi(.start) }.disabled(ai.status.state == "loading")
+                            Button("Load") { model.actions.localAi(.start) }
+                                .disabled(["loading", "installing"].contains(ai.status.state) || !ai.status.needsSetup.isEmpty)
                         }
                     }
                 }

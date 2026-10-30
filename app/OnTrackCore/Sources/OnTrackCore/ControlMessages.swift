@@ -52,14 +52,18 @@ public struct AiStatus: Equatable, Sendable {
     public var models: [String: String]  // chosen per task: quick, summary, project
     public var last: String  // what answered the latest request
     public var memoryMB: Int?
+    public var needsSetup: String  // "" | package | model: what Install would add
+    public var progress: Double?  // 0...1 while installing, nil when unknown
 
     public init(state: String = "off", mode: String = "claude", provider: String = "mlx", model: String = "",
                 message: String = "", installed: [String] = [], models: [String: String] = [:], last: String = "",
-                memoryMB: Int? = nil) {
+                memoryMB: Int? = nil, needsSetup: String = "", progress: Double? = nil) {
         self.state = state
         self.mode = mode
         self.provider = provider
         self.model = model
+        self.needsSetup = needsSetup
+        self.progress = progress
         self.message = message
         self.installed = installed
         self.models = models
@@ -132,6 +136,8 @@ public enum Inbound: Equatable, Sendable {
         let models: [String: String]?
         let last: String?
         let memory_mb: Int?
+        let needs_setup: String?
+        let progress: Double?
     }
 
     public struct DecodeError: Error, Equatable {
@@ -174,7 +180,8 @@ public enum Inbound: Equatable, Sendable {
         case "ai_status":
             return .aiStatus(AiStatus(state: try need(r.state), mode: try need(r.mode), provider: try need(r.provider),
                                       model: r.model ?? "", message: r.message ?? "", installed: r.installed ?? [],
-                                      models: r.models ?? [:], last: r.last ?? "", memoryMB: r.memory_mb))
+                                      models: r.models ?? [:], last: r.last ?? "", memoryMB: r.memory_mb,
+                                      needsSetup: r.needs_setup ?? "", progress: r.progress))
         case "error":
             return .error(EngineError(code: try need(r.code), message: r.message ?? "", recoverable: r.recoverable ?? true))
         default: return .unknown(r.type)
@@ -223,7 +230,7 @@ public struct AiSettings: Equatable, Sendable {
 }
 
 public enum LocalAiAction: String, Equatable, Sendable {
-    case start, stop, refresh
+    case start, stop, refresh, install
 }
 
 public enum FinalizeAction: String, Equatable, Sendable {

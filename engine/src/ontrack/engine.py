@@ -325,6 +325,8 @@ class EngineService:
                 self.ai.start()
             elif action == "stop":
                 self.ai.stop()
+            elif action == "install":
+                self.ai.install()
             else:
                 self._pool.submit(self.ai.refresh)  # lists installed models (may ask Ollama), loads nothing
         elif t == "set_config":

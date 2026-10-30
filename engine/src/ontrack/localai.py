@@ -3,15 +3,20 @@ no import of mlx-lm, no model in memory, no network call until `LocalAi.start()`
 from __future__ import annotations
 
 import gc
+import importlib
 import importlib.util
 import json
 import logging
 import os
 import queue
+import shutil
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+import fnmatch
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -92,7 +97,7 @@ class MlxProvider:
                 import mlx_lm  # noqa: PLC0415 (lazy on purpose)
             except ImportError as e:
                 raise LlmError("local_unavailable",
-                               "mlx-lm is not installed. Run: scripts/dev.sh local-ai") from e
+                               "Local AI is not installed. Press Install in Settings → Assistant → AI.") from e
             self._lm = mlx_lm
         return self._lm
 
@@ -110,12 +115,12 @@ class MlxProvider:
         found = cached_snapshot(repo, self._cache)
         if found:
             return found
-        raise LlmError("local_model_missing", f"{repo} is not downloaded. Run: uv run hf download {repo}")
+        raise LlmError("local_model_missing", f"{repo} is not downloaded. Press Install in Settings → Assistant → AI.")
 
     # -- provider interface
     def available(self) -> str | None:
         if self._lm is None and importlib.util.find_spec("mlx_lm") is None:  # looks only, imports nothing
-            return "mlx-lm is not installed. Run: scripts/dev.sh local-ai"
+            return "Local AI is not installed. Press Install in Settings → Assistant → AI."
         return None
 
     def installed(self) -> list[str]:
@@ -312,14 +317,86 @@ class OllamaProvider:
             raise LlmError("local_failed", f"Ollama stopped answering: {e}") from e
 
 
+
+# ------------------------------------------------------------------------------------------- install
+MODEL_FILES = ["*.json", "model*.safetensors", "*.py", "tokenizer.model", "*.tiktoken", "tiktoken.model", "*.txt",
+               "*.jsonl", "*.jinja"]  # what mlx_lm itself fetches
+_EXTRA_PATHS = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin")
+
+
+def engine_dir() -> Path | None:
+    d = Path(__file__).resolve().parents[2]
+    return d if (d / "pyproject.toml").exists() else None
+
+
+def install_package() -> None:
+    """`uv sync` with the local-ai extra into this engine's environment (explicit request only)."""
+    uv = shutil.which("uv", path=os.pathsep.join([os.environ.get("PATH", "")] + [os.path.expanduser(p) for p in _EXTRA_PATHS]))
+    root = engine_dir()
+    if uv is None or root is None:
+        raise LlmError("local_setup_failed", "Could not find uv. In Terminal run: scripts/dev.sh local-ai")
+    r = subprocess.run([uv, "sync", "--extra", "models", "--extra", "local-ai"], cwd=root, capture_output=True,
+                       text=True, timeout=900)
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout).strip().splitlines()[-1:] or ["unknown error"]
+        raise LlmError("local_setup_failed", f"Installing the local AI package failed: {tail[0]}")
+    importlib.invalidate_caches()
+
+
+def _remote_bytes(repo: str) -> int:
+    try:
+        with urllib.request.urlopen(f"https://huggingface.co/api/models/{repo}?blobs=true", timeout=10) as r:
+            files = json.load(r).get("siblings", [])
+        return sum(f.get("size") or 0 for f in files if any(fnmatch.fnmatch(f["rfilename"], p) for p in MODEL_FILES))
+    except (OSError, ValueError, KeyError):
+        return 0
+
+
+def _dir_bytes(d: Path) -> int:
+    total = 0
+    try:
+        for f in d.rglob("*"):
+            if f.is_file() and not f.is_symlink():
+                total += f.stat().st_size
+    except OSError:
+        pass
+    return total
+
+
+def download_model(repo: str, report: Callable[[float | None, str], None], cache: Path | None = None) -> None:
+    """Download a public model with a plain `huggingface_hub` call in a separate process. The engine runs in
+    offline mode, so the child gets a clean environment; this only ever happens when the user pressed Install."""
+    total = _remote_bytes(repo)
+    env = {k: v for k, v in os.environ.items() if k not in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")}
+    code = "import sys; from huggingface_hub import snapshot_download as s; s(sys.argv[1], allow_patterns=%r)" % (MODEL_FILES,)
+    proc = subprocess.Popen([sys.executable, "-c", code, repo], env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, text=True)
+    folder = (cache or _hf_cache()) / ("models--" + repo.replace("/", "--"))
+    while proc.poll() is None:
+        done = _dir_bytes(folder)
+        report(min(done / total, 0.99) if total else None,
+               f"{done / 1e9:.1f} of {total / 1e9:.1f} GB" if total else f"{done / 1e9:.1f} GB")
+        time.sleep(1.0)
+    if proc.returncode != 0:
+        tail = (proc.stderr.read() or "").strip().splitlines()[-1:] or ["unknown error"]
+        raise LlmError("local_setup_failed", f"Downloading {repo} failed: {tail[0]}")
+
 # ----------------------------------------------------------------------------------------- manager
 class LocalAi:
     """Which provider and models are chosen, and whether one is loaded right now.
     Loaded only by `start()` (an explicit request), freed by `stop()`; never at startup."""
 
     def __init__(self, cfg: Config, on_status: Callable[[], None] | None = None,
-                 providers: dict[str, Callable[[], object]] | None = None) -> None:
+                 providers: dict[str, Callable[[], object]] | None = None,
+                 install_package_fn: Callable[[], None] | None = None,
+                 download_fn: Callable[[str, Callable[[float | None, str], None]], None] | None = None,
+                 online_fn: Callable[[], bool] | None = None) -> None:
         self.cfg = cfg
+        self._install_package = install_package_fn or install_package
+        self._download = download_fn or download_model
+        self._online = online_fn
+        self.progress: float | None = None
+        self.needs_setup = ""  # "" | "package" | "model": what Install would do (mlx only)
         self.on_status = on_status or (lambda: None)
         self._factories = providers or {
             "mlx": MlxProvider,
@@ -359,6 +436,65 @@ class LocalAi:
     @property
     def ready(self) -> bool:
         return self.state == "ready"
+
+    # -- explicit one-time install (package + model); never loads the model
+    def install(self) -> None:
+        with self._lock:
+            if self.state in ("loading", "installing"):
+                return
+            if self.provider != "mlx":
+                self.state, self.message = "error", "Ollama keeps its own models. In Terminal: ollama pull <model>"
+                self.on_status()
+                return
+            if self.state == "ready":
+                self._unload_locked()  # the package may be replaced
+            self.state, self.message, self.progress = "installing", "Preparing…", None
+        self.on_status()
+        threading.Thread(target=self._install, daemon=True, name="ontrack-local-install").start()
+
+    def _report(self, progress: float | None, message: str) -> None:
+        with self._lock:
+            self.progress, self.message = progress, message
+        self.on_status()
+
+    def _install(self) -> None:
+        try:
+            online = self._online
+            if online is None:
+                from .ai import dns_online as online  # noqa: PLC0415
+            if not online():
+                raise LlmError("local_setup_failed", "No internet. Installing needs a connection once.")
+            prov = self._prov()
+            if prov.available():
+                self._report(None, "Installing the local AI package…")
+                self._install_package()
+            model = self.models["quick"]
+            if model and not cached_snapshot(model, getattr(prov, "_cache", None)):
+                self._report(None, f"Downloading {model.rsplit('/', 1)[-1]}…")
+                self._download(model, self._report)
+            with self._lock:
+                self.state, self.message, self.progress = "off", "Installed. Press Load when you want to use it.", None
+        except LlmError as e:
+            with self._lock:
+                self.state, self.message, self.progress = "error", e.message, None
+            log.warning("local AI install failed: %s", e.message)
+        except Exception as e:  # noqa: BLE001
+            with self._lock:
+                self.state, self.message, self.progress = "error", f"Install failed: {e}", None
+            log.exception("local AI install failed")
+        self._update_needs_setup()
+        self.on_status()
+
+    def _update_needs_setup(self) -> None:
+        if self.provider != "mlx":
+            self.needs_setup = ""
+            return
+        prov = self._prov()
+        if prov.available():
+            self.needs_setup = "package"
+        else:
+            model = self.models["quick"]
+            self.needs_setup = "model" if model and not cached_snapshot(model, getattr(prov, "_cache", None)) else ""
 
     # -- explicit load / unload
     def start(self) -> None:
@@ -412,6 +548,7 @@ class LocalAi:
         try:
             prov = self._prov()
             self._installed = prov.installed()
+            self._update_needs_setup()
             if self.state == "off":
                 self.message = prov.available() or ""
         except LlmError as e:
@@ -446,6 +583,7 @@ class LocalAi:
             "message": self.message, "installed": list(self._installed),
             "models": dict(self.models), "last": self.last,
             "memory_mb": prov.memory_mb() if prov is not None and self.state == "ready" else None,
+            "needs_setup": self.needs_setup, "progress": self.progress,
         }
 
 
