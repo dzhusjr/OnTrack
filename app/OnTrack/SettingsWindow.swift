@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import SwiftUI
 
@@ -35,7 +36,22 @@ final class SettingsModel: ObservableObject {
     @Published var improveAfterRecording = false { didSet { guard loaded else { return }; settings.improveAfterRecording = improveAfterRecording } }
     @Published var waitForPower = false { didSet { guard loaded else { return }; settings.waitForPowerToFinalize = waitForPower; actions.waitForPowerChanged() } }
     @Published var exportFolder: URL?
+    @Published var hasVoiceprint = false
+    @Published var micGranted = false
+    @Published var systemAudioGranted = false
     private var loaded = false
+
+    var languageTitle: String { MenuBarController.languages.first { $0.code == language }?.title ?? language }
+    var projectName: String { project.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "" }
+    var permissionsOK: Bool { micGranted && systemAudioGranted }
+    var permissionsSummary: String {
+        switch (micGranted, systemAudioGranted) {
+        case (true, true): return "Both granted."
+        case (false, true): return "Microphone is missing."
+        case (true, false): return "System audio is missing, so the other side of calls is not heard."
+        case (false, false): return "Both are missing."
+        }
+    }
 
     init(actions: SettingsActions) {
         self.actions = actions
@@ -58,6 +74,9 @@ final class SettingsModel: ObservableObject {
         improveAfterRecording = settings.improveAfterRecording
         waitForPower = settings.waitForPowerToFinalize
         exportFolder = settings.exportFolder
+        hasVoiceprint = FileManager.default.fileExists(atPath: settings.appSupportDir.appendingPathComponent("voiceprint.npy").path)
+        micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        systemAudioGranted = Permissions.screenCaptureAllowed
         loaded = true
     }
 
@@ -156,30 +175,47 @@ private struct GeneralTab: View {
     var body: some View {
         Form {
             Section("Overlay") {
-                Toggle("Show the live bar when recording starts", isOn: $model.autoShow)
-                Toggle("Live transcription when a session starts", isOn: $model.liveByDefault)
-                Note("Off: the session is only recorded and transcribed when you save. Toggle anytime with ⌥⇧L.")
+                Toggle(isOn: $model.autoShow) {
+                    Text("Show the live bar when recording starts")
+                    Text(model.autoShow ? "The overlay opens when you start a session."
+                                        : "Sessions start quietly. Show the overlay with ⌥Space.")
+                }
+                Toggle(isOn: $model.liveByDefault) {
+                    Text("Live transcription when a session starts")
+                    Text(model.liveByDefault ? "Text appears as people speak. Pause it anytime with ⌥⇧L."
+                                             : "Only audio is recorded and transcribed when you save. Turn it on anytime with ⌥⇧L.")
+                }
             }
             Section("Language") {
-                Picker("Transcribe in", selection: $model.language) {
+                Picker(selection: $model.language) {
                     ForEach(MenuBarController.languages, id: \.code) { Text($0.title).tag($0.code) }
+                } label: {
+                    Text("Transcribe in")
+                    Text(model.language == "auto"
+                         ? "Detects English, Dutch and Ukrainian phrase by phrase."
+                         : "Everything is transcribed as \(model.languageTitle). Use Automatic for mixed talks.")
                 }
-                Note("Pick one language when the whole conversation is in it. That is the most accurate.")
             }
             Section("Permissions") {
                 HStack {
-                    Text("Microphone and system audio")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Microphone and system audio")
+                        Caption(model.permissionsSummary)
+                    }
                     Spacer()
-                    Button("Check…") { model.actions.showPermissions() }
+                    Button(model.permissionsOK ? "Check…" : "Fix…") { model.actions.showPermissions() }
                 }
             }
             Section("Your voice") {
                 HStack {
-                    Text("Voiceprint")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Voiceprint")
+                        Caption(model.hasVoiceprint ? "Saved. Your lines are labelled Me."
+                                                    : "Not set. 30 seconds of you talking, so your lines are labelled Me.")
+                    }
                     Spacer()
-                    Button("Enroll My Voice…") { model.actions.enroll() }
+                    Button(model.hasVoiceprint ? "Enroll Again…" : "Enroll My Voice…") { model.actions.enroll() }
                 }
-                Note("30 seconds of you talking, so your lines are labelled Me.")
             }
         }
         .formStyle(.grouped)
@@ -197,20 +233,36 @@ private struct AssistantTab: View {
                     .focused($namesFocused)
                     .onSubmit { model.commitNames() }
                     .onChange(of: namesFocused) { _, focused in if !focused { model.commitNames() } }
-                Note("When someone says one of these, the line is highlighted. Separate with commas.")
+                Caption(model.names.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? "No names yet, so nothing is highlighted. Separate several with commas."
+                        : "Lines that mention these are highlighted. Separate with commas.")
             }
             Section("Replies") {
-                Toggle("Suggest a reply when someone says my name", isOn: $model.autoSuggest)
-                Toggle("Interview mode: suggest for every question", isOn: $model.interview)
-                Toggle("Use connectors (Jira, mail, calendar)", isOn: $model.connectors)
-                Note("Connectors come from Claude Code (claude mcp list) and are used only when the question needs them. "
-                     + "They add a few seconds. Reply anytime with ⌥⇧A.")
+                Toggle(isOn: $model.autoSuggest) {
+                    Text("Suggest a reply when someone says my name")
+                    Text(!model.autoSuggest ? "Lines are only highlighted. Ask for a reply anytime with ⌥⇧A."
+                         : model.names.trimmingCharacters(in: .whitespaces).isEmpty ? "Add your names above first."
+                         : "A short reply appears when someone says one of your names.")
+                }
+                Toggle(isOn: $model.interview) {
+                    Text("Interview mode")
+                    Text(model.interview ? "A reply appears for every question someone asks, from general knowledge, without your project."
+                                         : "Off. Replies only when someone says your name.")
+                }
+                Toggle(isOn: $model.connectors) {
+                    Text("Use connectors (Jira, mail, calendar)")
+                    Text(model.connectors ? "Claude checks your Claude Code connectors when a question needs them. Adds a few seconds."
+                                          : "Off. Fastest answers, from the talk, your project and git only.")
+                }
             }
             Section("Project folder") {
                 HStack {
-                    Text(model.project.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "None")
-                        .foregroundStyle(model.project == nil ? .secondary : .primary)
-                        .help(model.project ?? "")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.project.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "None")
+                            .help(model.project ?? "")
+                        Caption(model.project == nil ? "Answers use only the conversation."
+                                                     : "Answers use this folder, its git history and CLAUDE.md (read only).")
+                    }
                     Spacer()
                     if !model.recentProjects.isEmpty {
                         Menu("Recent") {
@@ -223,7 +275,6 @@ private struct AssistantTab: View {
                     Button("Choose…") { model.chooseProject() }
                     if model.project != nil { Button("Clear") { model.setProject(nil) } }
                 }
-                Note("Answers and replies use this folder, its git history and CLAUDE.md as context (read only).")
             }
         }
         .formStyle(.grouped)
@@ -236,24 +287,39 @@ private struct SavingTab: View {
     var body: some View {
         Form {
             Section("After recording") {
-                Toggle("Improve the transcript (accurate model and speakers)", isOn: $model.improveAfterRecording)
-                Toggle("Only when plugged in", isOn: $model.waitForPower)
-                    .disabled(!model.improveAfterRecording)
-                Note("Off: the live transcript is saved right away and uses almost no battery. "
-                     + "You can improve any session later in Notes.")
+                Toggle(isOn: $model.improveAfterRecording) {
+                    Text("Improve the transcript")
+                    Text(model.improveAfterRecording
+                         ? "The recording is transcribed again with the accurate model and speakers are separated. Takes minutes and uses battery."
+                         : "The live transcript is saved right away and uses almost no battery. Improve any session later in Notes.")
+                }
+                if model.improveAfterRecording {
+                    Toggle(isOn: $model.waitForPower) {
+                        Text("Only when plugged in")
+                        Text(model.waitForPower ? "On battery, sessions wait until your Mac is plugged in."
+                                                : "Starts right after you save, also on battery.")
+                    }
+                }
             }
             Section("Where notes go") {
                 PathRow(title: "Notes", url: model.notesDir) {
                     Button("Open") { model.actions.showNotes() }
                 }
-                Toggle("Also save into the project's Meetings/<date> folder", isOn: $model.saveToProject)
-                    .disabled(model.project == nil)
+                Toggle(isOn: $model.saveToProject) {
+                    Text("Also save into the project folder")
+                    Text(model.project == nil ? "Choose a project folder first (Assistant tab)."
+                         : model.saveToProject ? "Copies each session to \(model.projectName)/Meetings/<date>."
+                         : "Off. Notes stay in the notes folder.")
+                }
+                .disabled(model.project == nil)
                 HStack {
-                    Text("Also copy to")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Also copy to another folder")
+                        Caption(model.exportFolder.map { "Every session is also copied to \($0.lastPathComponent)." }
+                                ?? "Off. Useful for iCloud Drive or a course folder.")
+                    }
                     Spacer()
-                    Text(model.exportFolder?.lastPathComponent ?? "Off").foregroundStyle(.secondary)
-                        .help(model.exportFolder?.path ?? "")
-                    Button("Choose…") { model.chooseExportFolder() }
+                    Button(model.exportFolder == nil ? "Choose…" : "Change…") { model.chooseExportFolder() }
                     if model.exportFolder != nil { Button("Stop") { model.clearExportFolder() } }
                 }
             }
@@ -269,11 +335,13 @@ private struct AdvancedTab: View {
         Form {
             Section("Engine") {
                 HStack {
-                    Text("Engine config")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Engine config")
+                        Caption("Models, about_me for interview answers, vocabulary. Restart OnTrack after editing.")
+                    }
                     Spacer()
                     Button("Edit…") { model.actions.openConfig() }
                 }
-                Note("Models, about_me for interview answers, vocabulary. Restart OnTrack after editing.")
             }
             Section("Folders") {
                 PathRow(title: "Sessions", url: model.sessionsDir) { Button("Show") { model.actions.open(model.sessionsDir) } }
@@ -286,7 +354,7 @@ private struct AdvancedTab: View {
 
 // MARK: small pieces
 
-private struct Note: View {
+private struct Caption: View {
     let text: String
     init(_ text: String) { self.text = text }
 
