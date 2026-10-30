@@ -416,17 +416,17 @@ def test_engine_announces_status_loads_nothing_and_local_only_blocks_claude(dirs
 
 # ---- one-button install (package + model), separate from loading -----------------------------------
 class SetupProvider(FakeProvider):
-    def __init__(self, missing_pkg=True):
+    def __init__(self, missing_pkg=True, cache=None):
         super().__init__()
         self.missing_pkg = missing_pkg
-        self._cache = None
+        self._cache = cache  # an empty folder: never the real Hugging Face cache of the machine running the tests
 
     def available(self):
         return "not installed" if self.missing_pkg else None
 
 
 def make_install(tmp_path, pkg_missing=True, online=True, fail_download=None):
-    prov = SetupProvider(pkg_missing)
+    prov = SetupProvider(pkg_missing, tmp_path)
     calls = []
 
     def pkg():
