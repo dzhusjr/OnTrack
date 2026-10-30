@@ -137,7 +137,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 ("Saving", "tray.and.arrow.down", AnyView(SavingTab(model: model))),
                 ("Advanced", "wrench.and.screwdriver", AnyView(AdvancedTab(model: model))),
             ] {
-                let vc = NSHostingController(rootView: view.frame(width: 520, height: 440))
+                let vc = NSHostingController(rootView: view.frame(width: 520, height: 560).background(Color(nsColor: .windowBackgroundColor)))
                 vc.title = title
                 let item = NSTabViewItem(viewController: vc)
                 item.label = title
@@ -229,10 +229,15 @@ private struct AssistantTab: View {
     var body: some View {
         Form {
             Section("You") {
-                TextField("Names and trigger words", text: $model.names, prompt: Text("e.g. Alex, Sasha, Олекса"))
-                    .focused($namesFocused)
-                    .onSubmit { model.commitNames() }
-                    .onChange(of: namesFocused) { _, focused in if !focused { model.commitNames() } }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Names and trigger words")
+                    TextField("Names and trigger words", text: $model.names, prompt: Text("e.g. Alex, Sasha, Олекса"))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .focused($namesFocused)
+                        .onSubmit { model.commitNames() }
+                        .onChange(of: namesFocused) { _, focused in if !focused { model.commitNames() } }
+                }
                 Caption(model.names.trimmingCharacters(in: .whitespaces).isEmpty
                         ? "No names yet, so nothing is highlighted. Separate several with commas."
                         : "Lines that mention these are highlighted. Separate with commas.")
