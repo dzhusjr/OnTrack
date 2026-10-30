@@ -9,6 +9,16 @@ Free, local, realtime transcription for lectures, meetings and in-person convers
 
 ## Install (fresh Mac, ~30 min, mostly downloads)
 
+### Quick install (one command)
+
+Open Terminal and paste:
+
+```bash
+git clone https://github.com/dzhusjr/OnTrack.git ~/Desktop/Work/OnTrack && ~/Desktop/Work/OnTrack/scripts/install.sh
+```
+
+It installs what is missing (Apple command-line tools, `uv`, optionally Claude Code), opens the Hugging Face pages you need to accept once, downloads the models, builds the app and opens it. It asks before installing anything optional, including the local AI model, and is safe to rerun if something stops halfway. You only need to log in to a free Hugging Face account and, if you want answers and summaries, a Claude subscription. The steps below explain each part, or let you do it by hand.
+
 ### 0. What you need
 
 - A Mac with **Apple Silicon** (M1 or newer) and **macOS 14 Sonoma** or newer. Intel Macs are not supported.
@@ -62,7 +72,7 @@ The app expects the repo at `~/Desktop/Work/OnTrack`:
 mkdir -p ~/Desktop/Work
 ```
 ```bash
-git clone git@github.com:dzhusjr/OnTrack.git ~/Desktop/Work/OnTrack
+git clone https://github.com/dzhusjr/OnTrack.git ~/Desktop/Work/OnTrack
 ```
 ```bash
 cd ~/Desktop/Work/OnTrack
@@ -81,11 +91,7 @@ What `all` does, in order:
 6. **Creates a local code-signing certificate** — macOS asks for your login password once. This makes macOS remember the app's permissions across rebuilds.
 7. **Runs the tests, builds the app** into `~/Applications/OnTrack.app` and opens it.
 
-If you cloned somewhere else, tell the app once:
-
-```bash
-defaults write com.ontrack.app engineDir "$PWD/engine"
-```
+If you cloned somewhere else, that is fine: `scripts/dev.sh app` tells the app where the engine is.
 
 ### 4. First launch
 

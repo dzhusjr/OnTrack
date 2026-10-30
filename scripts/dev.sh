@@ -53,7 +53,7 @@ prereqs() {
   local free_gb; free_gb="$(df -g "$HOME" | awk 'NR==2 {print $4}')"
   [ "${free_gb:-0}" -ge 10 ] || echo "! Only ${free_gb} GB free — models and Python packages need about 8 GB"
   [ "$ROOT" = "$HOME/Desktop/Work/OnTrack" ] || \
-    echo "! Repo is at $ROOT — the app looks for ~/Desktop/Work/OnTrack. Run once: defaults write $BUNDLE_ID engineDir \"$ROOT/engine\""
+    echo "• Repo is at $ROOT (not ~/Desktop/Work/OnTrack): 'scripts/dev.sh app' tells the app where the engine is."
   return $bad
 }
 
@@ -71,9 +71,10 @@ local_ai() {
   local model="${1:-mlx-community/Qwen3-4B-Instruct-2507-4bit}"
   (cd "$ROOT/engine" && uv sync --extra models --extra local-ai)
   if ! (cd "$ROOT/engine" && uv run python -c "import sys; from ontrack.localai import cached_snapshot as c; sys.exit(0 if c('$model') else 1)"); then
-    echo "→ $model is not in the Hugging Face cache (${HF_HOME:-$HOME/.cache/huggingface}). Download it once (about 2.5 GB):"
-    echo "  cd $ROOT/engine && uv run hf download $model"
-    exit 1
+    echo "→ $model is not downloaded yet (about 2.5 GB, public, no account needed)."
+    local a=""; read -r -p "Download it now? [y/N] " a || true
+    [[ "$a" =~ ^[Yy] ]] || { echo "Later: cd $ROOT/engine && uv run hf download $model"; exit 1; }
+    (cd "$ROOT/engine" && uv run hf download "$model")
   fi
   (cd "$ROOT/engine" && uv run python -m ontrack.localai "$model")
 }
@@ -160,6 +161,10 @@ PLIST
       echo "• Signing ad-hoc — run 'scripts/dev.sh cert' once so permissions survive rebuilds."
       codesign --force --sign - "$app"
     fi
+  if [ "$ROOT" != "$HOME/Desktop/Work/OnTrack" ]; then  # the app looks for the engine in the default place
+    defaults write "$BUNDLE_ID" engineDir "$ROOT/engine"
+    echo "✓ told the app where the engine is ($ROOT/engine)"
+  fi
   echo "✓ installed ~/Applications/OnTrack.app"
 }
 
