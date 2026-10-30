@@ -57,11 +57,32 @@ prereqs() {
   return $bad
 }
 
+# `uv sync` removes packages that are not requested, so keep the optional local-AI extra when it is installed.
+sync_extras() {
+  local extras="--extra models"
+  if (cd "$ROOT/engine" && uv run --no-sync python -c "import mlx_lm" >/dev/null 2>&1); then extras="$extras --extra local-ai"; fi
+  echo "$extras"
+}
+
+# Optional: install mlx-lm and check that the local model loads and answers. Nothing is loaded by the app until
+# you press Load in Settings → Assistant. Usage: scripts/dev.sh local-ai [hf-model-id]
+local_ai() {
+  prereqs || exit 1
+  local model="${1:-mlx-community/Qwen3-4B-Instruct-2507-4bit}"
+  (cd "$ROOT/engine" && uv sync --extra models --extra local-ai)
+  if ! (cd "$ROOT/engine" && uv run python -c "from huggingface_hub import snapshot_download as s; s('$model', local_files_only=True)" >/dev/null 2>&1); then
+    echo "→ $model is not downloaded. Download it once (about 2.5 GB):"
+    echo "  cd $ROOT/engine && uv run hf download $model"
+    exit 1
+  fi
+  (cd "$ROOT/engine" && uv run python -m ontrack.localai "$model")
+}
+
 # Order matters: Hugging Face access is checked BEFORE ~5 GB of models are downloaded.
 setup() {
   prereqs || exit 1
   echo "→ Installing the engine's Python packages (one time, ~2 GB)…"
-  (cd "$ROOT/engine" && uv sync --extra models)
+  (cd "$ROOT/engine" && uv sync $(sync_extras))
   if ! (cd "$ROOT/engine" && uv run python -c "import huggingface_hub,sys; sys.exit(0 if huggingface_hub.get_token() else 1)"); then
     echo "→ Log in to Hugging Face. Paste a *Read* token from https://huggingface.co/settings/tokens"
     echo "  (answer 'n' when asked about git credentials)."
@@ -150,9 +171,10 @@ case "${1:-all}" in
   reset-permissions)
     tccutil reset Microphone "$BUNDLE_ID"
     tccutil reset ScreenCapture "$BUNDLE_ID" ;;
+  local-ai) shift; local_ai "$@" ;;
   test) test_all ;;
   app) app ;;
   run) open ~/Applications/OnTrack.app ;;
   all) setup; cert; test_all; app; open ~/Applications/OnTrack.app ;;
-  *) echo "usage: scripts/dev.sh [all|setup|models|doctor|cert|test|app|run|reset-permissions]"; exit 2 ;;
+  *) echo "usage: scripts/dev.sh [all|setup|models|doctor|cert|test|app|run|reset-permissions|local-ai [model]]"; exit 2 ;;
 esac

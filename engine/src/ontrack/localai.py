@@ -1,0 +1,474 @@
+"""Optional local language models (MLX or Ollama). Nothing here runs unless the user asks for it:
+no import of mlx-lm, no model in memory, no network call until `LocalAi.start()` is requested."""
+from __future__ import annotations
+
+import gc
+import importlib.util
+import json
+import logging
+import os
+import queue
+import threading
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from urllib.parse import urlparse
+
+from .config import Config
+from .llm import LlmError
+
+log = logging.getLogger(__name__)
+
+MODES = ("claude", "local_first", "local_only")
+PROVIDERS = ("mlx", "ollama")
+TASKS = ("quick", "summary", "project")
+_NOT_LLM = ("whisper", "pyannote", "wespeaker", "silero", "embedding", "segmentation")
+
+
+def _hf_cache() -> Path:
+    if os.environ.get("HF_HUB_CACHE"):
+        return Path(os.environ["HF_HUB_CACHE"]).expanduser()
+    home = Path(os.environ.get("HF_HOME", "~/.cache/huggingface")).expanduser()
+    return home / "hub"
+
+
+def installed_mlx_models(cache: Path | None = None) -> list[str]:
+    """Language models already in the Hugging Face cache (never downloads anything)."""
+    root = cache or _hf_cache()
+    out: list[str] = []
+    try:
+        for d in sorted(root.glob("models--*--*")):
+            _, org, name = d.name.split("--", 2)
+            if any(w in name.lower() for w in _NOT_LLM):
+                continue
+            if any(d.glob("snapshots/*/config.json")) and any(d.glob("snapshots/*/*.safetensors")):
+                out.append(f"{org}/{name}")
+    except OSError:
+        pass
+    return out
+
+
+# ---------------------------------------------------------------------------------------------- MLX
+class MlxProvider:
+    """mlx-lm in this process. All model work happens on one dedicated thread (MLX streams are per thread)."""
+    name = "mlx"
+
+    def __init__(self, lm=None, resolve: Callable[[str], str] | None = None, cache: Path | None = None) -> None:
+        self._lm = lm  # injected in tests; otherwise imported on first load
+        self._resolve = resolve
+        self._cache = cache
+        self._ex: ThreadPoolExecutor | None = None
+        self._model = None
+        self._tok = None
+        self._loaded: str | None = None
+
+    # -- helpers
+    def _module(self):
+        if self._lm is None:
+            try:
+                import mlx_lm  # noqa: PLC0415 (lazy on purpose)
+            except ImportError as e:
+                raise LlmError("local_unavailable",
+                               "mlx-lm is not installed. Run: scripts/dev.sh local-ai") from e
+            self._lm = mlx_lm
+        return self._lm
+
+    def _executor(self) -> ThreadPoolExecutor:
+        if self._ex is None:
+            self._ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontrack-mlx")
+        return self._ex
+
+    def _local_path(self, repo: str) -> str:
+        """The cached copy of a model. Never downloads: a missing model is an error with the fix."""
+        if self._resolve is not None:
+            return self._resolve(repo)
+        if Path(repo).expanduser().is_dir():
+            return str(Path(repo).expanduser())
+        try:
+            from huggingface_hub import snapshot_download  # noqa: PLC0415
+
+            return snapshot_download(repo, local_files_only=True)
+        except Exception as e:  # noqa: BLE001 — not cached, or huggingface_hub missing
+            raise LlmError("local_model_missing",
+                           f"{repo} is not downloaded. Run: uv run hf download {repo}") from e
+
+    # -- provider interface
+    def available(self) -> str | None:
+        if self._lm is None and importlib.util.find_spec("mlx_lm") is None:  # looks only, imports nothing
+            return "mlx-lm is not installed. Run: scripts/dev.sh local-ai"
+        return None
+
+    def installed(self) -> list[str]:
+        return installed_mlx_models(self._cache)
+
+    def loaded(self) -> str | None:
+        return self._loaded
+
+    def load(self, model: str) -> None:
+        if self._loaded == model:
+            return
+        lm = self._module()
+        path = self._local_path(model)
+
+        def work():
+            self._model = self._tok = None
+            gc.collect()
+            self._model, self._tok = lm.load(path)
+            self._loaded = model
+
+        try:
+            self._executor().submit(work).result()
+        except LlmError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            self._loaded = None
+            raise LlmError("local_failed", f"Could not load {model}: {e}") from e
+
+    def unload(self) -> None:
+        if self._ex is None:
+            self._loaded = None
+            return
+
+        def work():
+            self._model = self._tok = None
+            self._loaded = None
+            gc.collect()
+            try:
+                import mlx.core as mx  # noqa: PLC0415
+
+                getattr(mx, "clear_cache", None) and mx.clear_cache()
+            except Exception:  # noqa: BLE001
+                pass
+
+        self._ex.submit(work).result()
+        self._ex.shutdown(wait=True)
+        self._ex = None
+
+    def memory_mb(self) -> int | None:
+        if self._loaded is None:
+            return None
+        try:
+            import mlx.core as mx  # noqa: PLC0415
+
+            return int(mx.get_active_memory() / 1e6)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def stream(self, prompt: str, model: str, max_tokens: int, timeout_s: float) -> Iterator[str]:
+        if self._loaded != model:
+            raise LlmError("local_not_loaded", f"{model} is not loaded.")
+        lm = self._module()
+        out: queue.Queue = queue.Queue()
+        stop = threading.Event()
+
+        def work():
+            try:
+                ids = self._tok.apply_chat_template([{"role": "user", "content": prompt}], add_generation_prompt=True)
+                kwargs = {"max_tokens": max_tokens}
+                try:
+                    from mlx_lm.sample_utils import make_sampler  # noqa: PLC0415
+
+                    kwargs["sampler"] = make_sampler(temp=0.3, top_p=0.9)
+                except Exception:  # noqa: BLE001
+                    pass
+                for r in lm.stream_generate(self._model, self._tok, prompt=ids, **kwargs):
+                    if stop.is_set():
+                        break
+                    if r.text:
+                        out.put(r.text)
+                out.put(None)
+            except Exception as e:  # noqa: BLE001
+                out.put(e)
+
+        self._executor().submit(work)
+        deadline = time.monotonic() + timeout_s
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise LlmError("llm_timeout", f"The local model did not answer within {timeout_s:.0f} s")
+                try:
+                    item = out.get(timeout=remaining)
+                except queue.Empty:
+                    continue
+                if item is None:
+                    return
+                if isinstance(item, Exception):
+                    raise LlmError("local_failed", f"Local model failed: {item}") from item
+                yield item
+        finally:
+            stop.set()
+
+
+# ------------------------------------------------------------------------------------------- Ollama
+class OllamaProvider:
+    """A running Ollama on this Mac (loopback only, so nothing leaves the machine)."""
+    name = "ollama"
+
+    def __init__(self, url: str = "http://127.0.0.1:11434", keep_alive: str = "30m") -> None:
+        host = urlparse(url).hostname or ""
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            raise LlmError("local_unavailable", "The Ollama address must be on this Mac (127.0.0.1).")
+        self.url = url.rstrip("/")
+        self.keep_alive = keep_alive
+        self._loaded: str | None = None
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # never via a proxy
+
+    def _call(self, path: str, body: dict | None = None, timeout: float = 5.0):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.url + path, data=data, headers={"Content-Type": "application/json"})
+        return self._opener.open(req, timeout=timeout)
+
+    def available(self) -> str | None:
+        try:
+            self._call("/api/tags", timeout=2.0).close()
+        except (urllib.error.URLError, OSError):
+            return "Ollama is not running. Open the Ollama app or run: ollama serve"
+        return None
+
+    def installed(self) -> list[str]:
+        try:
+            with self._call("/api/tags", timeout=2.0) as r:
+                return sorted(m["name"] for m in json.load(r).get("models", []))
+        except (urllib.error.URLError, OSError, ValueError, KeyError):
+            return []
+
+    def loaded(self) -> str | None:
+        return self._loaded
+
+    def load(self, model: str) -> None:
+        problem = self.available()
+        if problem:
+            raise LlmError("local_unavailable", problem)
+        if model not in self.installed():
+            raise LlmError("local_model_missing", f"Ollama does not have {model}. Run: ollama pull {model}")
+        try:
+            self._call("/api/generate", {"model": model, "prompt": "", "stream": False,
+                                         "keep_alive": self.keep_alive}, timeout=120.0).close()
+        except (urllib.error.URLError, OSError) as e:
+            raise LlmError("local_failed", f"Ollama could not load {model}: {e}") from e
+        self._loaded = model
+
+    def unload(self) -> None:
+        model, self._loaded = self._loaded, None
+        if model:
+            try:
+                self._call("/api/generate", {"model": model, "prompt": "", "stream": False, "keep_alive": 0}).close()
+            except (urllib.error.URLError, OSError):
+                pass
+
+    def memory_mb(self) -> int | None:
+        return None  # Ollama manages its own memory
+
+    def stream(self, prompt: str, model: str, max_tokens: int, timeout_s: float) -> Iterator[str]:
+        if self._loaded != model:
+            raise LlmError("local_not_loaded", f"{model} is not loaded.")
+        body = {"model": model, "stream": True, "keep_alive": self.keep_alive,
+                "messages": [{"role": "user", "content": prompt}],
+                "options": {"num_predict": max_tokens, "temperature": 0.3}}
+        deadline = time.monotonic() + timeout_s
+        try:
+            with self._call("/api/chat", body, timeout=timeout_s) as r:
+                for raw in r:
+                    if time.monotonic() > deadline:
+                        raise LlmError("llm_timeout", f"The local model did not answer within {timeout_s:.0f} s")
+                    try:
+                        ev = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if ev.get("error"):
+                        raise LlmError("local_failed", f"Ollama: {ev['error']}")
+                    text = (ev.get("message") or {}).get("content")
+                    if text:
+                        yield text
+                    if ev.get("done"):
+                        return
+        except (urllib.error.URLError, OSError) as e:
+            raise LlmError("local_failed", f"Ollama stopped answering: {e}") from e
+
+
+# ----------------------------------------------------------------------------------------- manager
+class LocalAi:
+    """Which provider and models are chosen, and whether one is loaded right now.
+    Loaded only by `start()` (an explicit request), freed by `stop()`; never at startup."""
+
+    def __init__(self, cfg: Config, on_status: Callable[[], None] | None = None,
+                 providers: dict[str, Callable[[], object]] | None = None) -> None:
+        self.cfg = cfg
+        self.on_status = on_status or (lambda: None)
+        self._factories = providers or {
+            "mlx": MlxProvider,
+            "ollama": lambda: OllamaProvider(self.cfg.ollama_url, self.cfg.ollama_keep_alive),
+        }
+        self._providers: dict[str, object] = {}
+        self._lock = threading.RLock()
+        self.mode = cfg.ai_mode if cfg.ai_mode in MODES else "claude"
+        self.provider = cfg.local_provider if cfg.local_provider in PROVIDERS else "mlx"
+        self.models = {"quick": cfg.local_model_quick, "summary": cfg.local_model_summary,
+                       "project": cfg.local_model_project}
+        self.state = "off"  # off | loading | ready | error
+        self.message = ""
+        self.last = ""  # what answered the most recent request
+        self._installed: list[str] = []
+
+    # -- settings (never load anything)
+    def configure(self, mode: str | None = None, provider: str | None = None, models: dict | None = None) -> None:
+        with self._lock:
+            if provider in PROVIDERS and provider != self.provider:
+                self._unload_locked()
+                self.provider = provider
+            if mode in MODES:
+                self.mode = mode
+                if mode == "claude":
+                    self._unload_locked()  # turning local AI off frees the memory right away
+            for task, model in (models or {}).items():
+                if task in TASKS and isinstance(model, str):
+                    self.models[task] = model.strip()
+        self.on_status()
+
+    def _prov(self):
+        if self.provider not in self._providers:
+            self._providers[self.provider] = self._factories[self.provider]()
+        return self._providers[self.provider]
+
+    @property
+    def ready(self) -> bool:
+        return self.state == "ready"
+
+    # -- explicit load / unload
+    def start(self) -> None:
+        """Load the quick model in the background. Status messages report progress and errors."""
+        with self._lock:
+            if self.mode == "claude":
+                self.state, self.message = "error", "Local AI is off. Choose Local first or Local only in Settings."
+                self.on_status()
+                return
+            if self.state == "loading":
+                return
+            model = self.models["quick"]
+            if not model:
+                self.state, self.message = "error", "Choose a quick-reply model first."
+                self.on_status()
+                return
+            self.state, self.message = "loading", f"Loading {model}…"
+        self.on_status()
+        threading.Thread(target=self._load, args=(model,), daemon=True, name="ontrack-local-load").start()
+
+    def _load(self, model: str) -> None:
+        try:
+            self._prov().load(model)
+            with self._lock:
+                self.state, self.message = "ready", ""
+        except LlmError as e:
+            with self._lock:
+                self.state, self.message = "error", e.message
+            log.warning("local model load failed: %s", e.message)
+        except Exception as e:  # noqa: BLE001
+            with self._lock:
+                self.state, self.message = "error", f"Could not load {model}: {e}"
+            log.exception("local model load failed")
+        self.on_status()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._unload_locked()
+        self.on_status()
+
+    def _unload_locked(self) -> None:
+        prov = self._providers.get(self.provider)
+        if prov is not None:
+            try:
+                prov.unload()
+            except Exception:  # noqa: BLE001
+                log.exception("unloading the local model failed")
+        self.state, self.message = "off", ""
+
+    def refresh(self) -> None:
+        try:
+            prov = self._prov()
+            self._installed = prov.installed()
+            if self.state == "off":
+                self.message = prov.available() or ""
+        except LlmError as e:
+            self._installed, self.message = [], e.message
+        self.on_status()
+
+    # -- use
+    def stream(self, prompt: str, model: str, max_tokens: int, timeout_s: float) -> Iterator[str]:
+        """Generate with `model` (loaded now if another model is resident: only while local AI is on)."""
+        with self._lock:
+            if self.state != "ready":
+                raise LlmError("local_not_loaded", "The local model is not loaded. Press Load in Settings → Assistant.")
+            prov = self._prov()
+            if prov.loaded() != model:
+                self.state, self.message = "loading", f"Loading {model}…"
+                self.on_status()
+                try:
+                    prov.load(model)
+                except LlmError as e:
+                    self.state, self.message = "error", e.message
+                    self.on_status()
+                    raise
+                self.state, self.message = "ready", ""
+                self.on_status()
+        yield from prov.stream(prompt, model, max_tokens, timeout_s)
+
+    def status(self) -> dict:
+        prov = self._providers.get(self.provider)
+        return {
+            "type": "ai_status", "state": self.state, "mode": self.mode, "provider": self.provider,
+            "model": (prov.loaded() if prov is not None else None) or "",
+            "message": self.message, "installed": list(self._installed),
+            "models": dict(self.models), "last": self.last,
+            "memory_mb": prov.memory_mb() if prov is not None and self.state == "ready" else None,
+        }
+
+
+# -------------------------------------------------------------------------------- manual check (Mac)
+def main(argv: list[str] | None = None) -> int:
+    """`uv run python -m ontrack.localai [model]`: load the model, answer one prompt, report speed and memory, free it.
+    Run by `scripts/dev.sh local-ai`. This is the only place that loads a model without the app asking."""
+    import argparse
+
+    cfg = Config()
+    ap = argparse.ArgumentParser(prog="ontrack.localai")
+    ap.add_argument("model", nargs="?", default=cfg.local_model_quick)
+    ap.add_argument("--provider", choices=PROVIDERS, default="mlx")
+    args = ap.parse_args(argv)
+    prov = MlxProvider() if args.provider == "mlx" else OllamaProvider(cfg.ollama_url)
+    try:
+        problem = prov.available()
+        if problem:
+            print("✗", problem)
+            return 1
+        t0 = time.monotonic()
+        prov.load(args.model)
+        print(f"✓ loaded {args.model} in {time.monotonic() - t0:.1f} s")
+        t1, first, n = time.monotonic(), None, 0
+        out = []
+        for chunk in prov.stream("Answer in one short sentence: what is a mutex?", args.model, 80, 120):
+            first = first if first is not None else time.monotonic() - t1
+            n += 1
+            out.append(chunk)
+        total = time.monotonic() - t1
+        print(f"✓ first word after {first or 0:.2f} s, {n / max(total, 1e-6):.0f} chunks/s")
+        print("  " + "".join(out).strip())
+        mem = prov.memory_mb()
+        if mem is not None:
+            print(f"  memory in use: {mem / 1000:.1f} GB")
+        return 0
+    except LlmError as e:
+        print("✗", e.message)
+        return 1
+    finally:
+        prov.unload()
+        print("✓ unloaded")
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

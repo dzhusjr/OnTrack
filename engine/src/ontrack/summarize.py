@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+from .ai import for_task
 from .config import Config
 from .session import read_lines
 
@@ -54,6 +55,6 @@ def summarize(runner, session_dir: Path, cfg: Config, projects: tuple[str, ...] 
         transcript, _read(session_dir / "notes.md"), _read(session_dir / "qa.md"), dominant_language(session_dir),
         me=cfg.my_names[0] if cfg.my_names else "the user", date=session_date(session_dir), projects=projects,
     )
-    text = runner.complete(prompt, cfg.summary_timeout_s).strip()
+    text = for_task(runner, "summary").complete(prompt, cfg.summary_timeout_s).strip()
     (session_dir / "summary.md").write_text(text, encoding="utf-8")
     return text

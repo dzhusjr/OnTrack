@@ -22,7 +22,9 @@ from .audio_source import FrameDecoder
 from .config import Config, apply_overrides, load_config
 from .control import NdjsonDecoder, ProtocolError, encode, validate
 from .finalize import FinalizeDeps, ProcessingDeferred, finalize, improve_saved, notes_dir_for, retry_summary
+from .ai import AiRouter
 from .llm import ClaudeRunner, LlmError
+from .localai import LocalAi
 from .pipeline import Backends, Lazy, Pipeline, real_backends
 from .assist import (address_reason, build_interview_prompt, build_reply_prompt, build_suggest_prompt, name_regex,
                      transcript_tail)
@@ -79,13 +81,14 @@ class EngineService:
         self.cfg = cfg
         self.model_ready = not (isinstance(backends.asr, Lazy) or hasattr(backends.asr, "warmup"))
         self.backends = Backends(backends.vad_factory, LockedAsr(backends.asr), backends.embedder)
-        self.runner = runner
         self.diarizer = diarizer
         self.fallback_asr = LockedAsr(fallback_asr) if fallback_asr is not None else None
         # full large-v3 for the saved transcript (more accurate than the live turbo model)
         self.final_asr = LockedAsr(final_asr) if final_asr is not None else self.backends.asr
-        self.qa = QaService(runner, cfg)
-        self.runner = runner
+        # Claude by default; the optional local model is only ever loaded by an explicit request from the app
+        self.ai = LocalAi(cfg, on_status=self._send_ai_status)
+        self.runner = AiRouter(runner, cfg, self.ai)
+        self.qa = QaService(self.runner, cfg)
         # per-session choices from the app (menu): project folder for Claude, language lock, reply helper
         self.opts: dict = {"project_dir": None, "languages": None, "assist": True, "interview": False,
                            "connectors": False}
@@ -168,6 +171,7 @@ class EngineService:
             log.info("engine stopped")
 
     async def shutdown(self) -> None:
+        self.ai.stop()  # frees the local model, if one was loaded
         if self.state == "recording":
             await self._stop_session(notify=False)
         if self._stopping is not None:
@@ -212,6 +216,9 @@ class EngineService:
             "degraded": self.degraded, "live": self.live, "paused": self.paused,
         })
 
+    def _send_ai_status(self) -> None:
+        self.send(self.ai.status())
+
     def _set_state(self, state: str) -> None:
         self.state = state
         self._send_status()
@@ -237,6 +244,7 @@ class EngineService:
         self._ctrl = writer
         self._clients.add(writer)
         self._send_status()
+        self._send_now(self.ai.status())
         dec = NdjsonDecoder()
         try:
             while data := await reader.read(65536):
@@ -308,10 +316,22 @@ class EngineService:
             self._set_options(msg)
         elif t == "suggest":
             self._suggest(str(msg["id"]), trigger=None, delay=0.0, auto=False)
+        elif t == "set_ai":
+            self.ai.configure(msg.get("mode"), msg.get("provider"),
+                              {k: msg[k] for k in ("quick", "summary", "project") if k in msg})
+        elif t == "local_ai":
+            action = msg["action"]
+            if action == "start":
+                self.ai.start()
+            elif action == "stop":
+                self.ai.stop()
+            else:
+                self._pool.submit(self.ai.refresh)  # lists installed models (may ask Ollama), loads nothing
         elif t == "set_config":
             try:
                 self.cfg = apply_overrides(self.cfg, msg["config"])
                 self.qa.cfg = self.cfg
+                self.runner.cfg = self.cfg
             except (ValueError, TypeError) as e:
                 self._send_now(self._error("bad_config", str(e)))
 

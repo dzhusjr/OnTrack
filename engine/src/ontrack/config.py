@@ -49,6 +49,16 @@ class Config:
     llm_model: str = "sonnet"  # end-of-session summary
     fast_llm_model: str = "haiku"  # live questions and suggested replies: fastest model
     claude_path: str = ""
+    # --- optional local AI (off by default; nothing is loaded until you press Load in Settings) ---
+    ai_mode: str = "claude"  # "claude" | "local_first" (local when loaded, Claude as fallback) | "local_only" (never Claude)
+    local_provider: str = "mlx"  # "mlx" (mlx-lm, in this engine) | "ollama" (a running Ollama on this Mac)
+    local_model_quick: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit"  # live answers and suggested replies
+    local_model_summary: str = ""  # empty = Claude (local_first) / the quick model (local_only)
+    local_model_project: str = ""  # questions about your project folder; same rule
+    local_max_tokens: int = 400
+    local_summary_max_tokens: int = 1800
+    ollama_url: str = "http://127.0.0.1:11434"  # must stay on this Mac
+    ollama_keep_alive: str = "30m"
     llm_extra_args: tuple[str, ...] = ("--strict-mcp-config", "--tools", "")  # Q&A only: no tools, no MCP servers
     max_backlog_s: float = 120.0
     qa_timeout_s: float = 60

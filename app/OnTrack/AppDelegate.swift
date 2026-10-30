@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         voiceprintFile: settings.appSupportDir.appendingPathComponent("voiceprint.npy"),
         enroll: { [weak self] in self?.startEnrollment() })
 
+    private let aiStatus = AiStatusModel()  // local AI state reported by the engine
+
     private lazy var settingsWindow = SettingsWindowController(actions: SettingsActions(
         sessionOptionsChanged: { [weak self] in self?.sendSessionOptions() },
         autoShowChanged: { [weak self] on in self?.store.setAutoShow(on) },
@@ -52,8 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.supervisor.restart()
             }
         },
+        aiSettingsChanged: { [weak self] in self?.sendAiSettings() },
+        localAi: { [weak self] action in self?.client.send(.localAi(action)) },
         open: { [weak self] url in self?.open(url) }
-    ))
+    ), aiStatus: aiStatus)
 
     private lazy var notesWindow: NotesWindowController = {
         let w = NotesWindowController(notesDir: settings.notesDir) { [weak self] id, question, sid in
@@ -99,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openNotes: { [weak self] in self?.open(self?.settings.notesDir) },
             openLogs: { [weak self] in self?.open(self?.settings.logsDir) },
             openConfig: { [weak self] in self?.openConfig() },
+            aiMenuLine: { [weak self] in self?.aiStatus.menuLine },
             toggleAutoShow: { [weak self] in
                 guard let self else { return }
                 self.settings.autoShowOverlay.toggle()
@@ -303,6 +308,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else if st.state == "recording" || st.state == "enrolling" {
                 client.releaseAudio()
             }
+        case let .aiStatus(s):
+            aiStatus.status = s
         case .enrollDone:
             finishEnrollment()
         case let .error(err):
@@ -380,6 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func connectionChanged(_ up: Bool) {
         if up {
             sendSessionOptions()  // a (re)started engine starts with defaults
+            sendAiSettings()  // the choice only; a local model is never loaded here, only by Load in Settings
             processingSessionId = nil  // a restarted engine forgot it: try again
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.processQueue(force: false) }
             // Engine restarted mid-session → resume the same session (spec §8). Audio stays buffered until confirmed.
@@ -395,6 +403,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: actions
+
+    private func sendAiSettings() {
+        guard client.isConnected else { return }
+        client.send(.setAi(settings.aiSettings))
+    }
 
     private func sendSessionOptions() {
         guard client.isConnected else { return }

@@ -28,3 +28,6 @@
 {"type":"defer_processing","session_id":"2026-10-23-1405-linear-algebra"}
 {"type":"continue_processing","session_id":"2026-10-23-1405-linear-algebra"}
 {"type":"processing_deferred","session_id":"2026-10-23-1405-linear-algebra"}
+{"type":"set_ai","mode":"local_first","provider":"mlx","quick":"mlx-community/Qwen3-4B-Instruct-2507-4bit","summary":"","project":""}
+{"type":"local_ai","action":"start"}
+{"type":"ai_status","state":"ready","mode":"local_first","provider":"mlx","model":"mlx-community/Qwen3-4B-Instruct-2507-4bit","message":"","installed":["mlx-community/Qwen3-4B-Instruct-2507-4bit"],"models":{"quick":"mlx-community/Qwen3-4B-Instruct-2507-4bit","summary":"","project":""},"last":"Local · Qwen3-4B-Instruct-2507-4bit","memory_mb":2400}

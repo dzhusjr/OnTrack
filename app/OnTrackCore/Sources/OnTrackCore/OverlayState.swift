@@ -338,7 +338,7 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
             s.mode = .endCard
             s.progress = nil
         }
-    case .pong, .unknown:
+    case .pong, .unknown, .aiStatus:  // local AI status is shown in Settings, not in the overlay
         break
     }
     return []

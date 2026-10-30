@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import Config
+from .ai import for_task
 from .llm import LlmError
 
 
@@ -62,7 +63,7 @@ def fast_stream(runner, cfg: Config, prompt: str, timeout_s: float, project_dir:
         kwargs["project_dir"] = project_dir
     if connectors:
         kwargs["connectors"] = True
-    return runner.stream(prompt, timeout_s, **kwargs)
+    return for_task(runner, "project" if project_dir else "quick").stream(prompt, timeout_s, **kwargs)
 
 
 class QaService:

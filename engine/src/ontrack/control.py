@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 FINALIZE_ACTIONS = ("save_all", "transcript_only", "discard")
+LOCAL_AI_ACTIONS = ("start", "stop", "refresh")
 
 # type -> required fields (beyond "type")
 REQUIRED: dict[str, tuple[str, ...]] = {
@@ -24,6 +25,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "set_paused": ("paused",),  # pause/resume recording; nothing is captured while paused
     "set_session_options": (),  # any of: project_dir, languages, assist, interview, names, connectors
     "suggest": ("id",),  # draft a reply to the latest thing someone said
+    "set_ai": (),  # any of: mode (claude|local_first|local_only), provider (mlx|ollama), quick, summary, project (models)
+    "local_ai": ("action",),  # start | stop | refresh — the local model loads only on "start"
     # engine -> app
     "pong": ("state",),
     "status": ("state", "model_ready", "session_id", "degraded"),
@@ -38,6 +41,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "finalize_progress": ("session_id", "stage", "pct"),
     "finalize_done": ("session_id", "notes_path"),
     "enroll_done": ("score",),
+    "ai_status": ("state", "mode", "provider"),  # local AI: off|loading|ready|error, chosen models, last route
     "error": ("code", "message", "recoverable"),
 }
 
@@ -61,6 +65,8 @@ def validate(msg: dict) -> dict:
         raise ProtocolError(f"{t}: missing {', '.join(missing)}")
     if t == "finalize" and msg["action"] not in FINALIZE_ACTIONS:
         raise ProtocolError(f"finalize: invalid action {msg['action']!r}")
+    if t == "local_ai" and msg["action"] not in LOCAL_AI_ACTIONS:
+        raise ProtocolError(f"local_ai: invalid action {msg['action']!r}")
     return msg
 
 
