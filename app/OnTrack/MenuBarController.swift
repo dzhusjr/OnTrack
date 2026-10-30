@@ -25,6 +25,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var quit: () -> Void
         var session: SessionMenu
         var showNotes: () -> Void
+        var showSettings: () -> Void
     }
 
     /// Project folder, language lock and reply helper for the next / current session.
@@ -90,9 +91,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             image?.isTemplate = true
         }
         button.image = image
-        button.toolTip = state.recording ? "OnTrack — recording \(sessionName ?? "")" : "OnTrack"
+        button.toolTip = state.recording ? "OnTrack: recording \(sessionName ?? "")" : "OnTrack"
     }
 
+    /// Kept short: things you use during a session. Everything else lives in Settings (⌘,).
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         if state.recording {
@@ -104,16 +106,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         add(menu, state.recording ? "Stop Session" : "Start Session…", #selector(startStop), key: "s", mods: [.option, .shift],
             enabled: canStart)
         add(menu, "Show / Hide Overlay", #selector(toggleOverlay), key: " ", mods: [.option])
+        add(menu, "Suggest a Reply", #selector(suggestNow), key: "a", mods: [.option, .shift], enabled: state.recording)
         let live = NSMenuItem(title: "Live Transcription", action: #selector(toggleLive), keyEquivalent: "l")
         live.keyEquivalentModifierMask = [.option, .shift]
         live.target = self
         live.state = state.liveTranscription ? .on : .off
         menu.addItem(live)
-        let power = NSMenuItem(title: "Transcribe After Recording Only When Plugged In",
-                               action: #selector(toggleWaitForPower), keyEquivalent: "")
-        power.target = self
-        power.state = actions.waitForPower() ? .on : .off
-        menu.addItem(power)
+        addSessionItems(menu)
         let queued = actions.queuedCount()
         if queued > 0 {
             let waiting = NSMenuItem(title: "Waiting for power: \(queued) session\(queued == 1 ? "" : "s")",
@@ -122,26 +121,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(waiting)
             add(menu, "Process Now", #selector(processNow))
         }
-        addSessionItems(menu)
-        let auto = NSMenuItem(title: "Show Live Bar When Recording", action: #selector(toggleAutoShow), keyEquivalent: "")
-        auto.target = self
-        auto.state = actions.autoShow() ? .on : .off
-        menu.addItem(auto)
-        menu.addItem(.separator())
-        add(menu, "Enroll My Voice…", #selector(enroll), enabled: state.engineState == "idle")
-        add(menu, "Retry Summary", #selector(retrySummary), enabled: canRetrySummary)
-        menu.addItem(.separator())
-        add(menu, "Notes…", #selector(showNotes))
-        add(menu, "Open Sessions Folder", #selector(openSessions))
-        add(menu, "Open Notes Folder", #selector(openNotes))
-        if let name = actions.exportFolderName() {
-            add(menu, "Also Saving Notes to “\(name)” — Change…", #selector(chooseExportFolder))
-            add(menu, "Stop Saving Notes to “\(name)”", #selector(clearExportFolder))
-        } else {
-            add(menu, "Also Save Notes To…", #selector(chooseExportFolder))
-        }
-        add(menu, "Open Logs", #selector(openLogs))
-        add(menu, "Edit Engine Config…", #selector(openConfig))
+        if canRetrySummary { add(menu, "Retry Summary", #selector(retrySummary)) }
+        add(menu, "Notes…", #selector(showNotes), key: "n", mods: [.command])
+        add(menu, "Settings…", #selector(showSettings), key: ",", mods: [.command])
         menu.addItem(.separator())
         let status = NSMenuItem(title: "Engine: \(state.engineState)\(state.modelReady ? "" : " (loading model)")",
                                 action: nil, keyEquivalent: "")
@@ -150,6 +132,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         add(menu, "Quit OnTrack", #selector(quit), key: "q")
     }
 
+    /// Per-session quick switches: project folder, language, interview mode.
     private func addSessionItems(_ menu: NSMenu) {
         menu.addItem(.separator())
         let s = actions.session
@@ -174,15 +157,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let choose = NSMenuItem(title: "Choose Folder…", action: #selector(chooseProject), keyEquivalent: "")
         choose.target = self
         projects.addItem(choose)
-        let saveHere = NSMenuItem(title: "Also Save Notes Into Meetings/<date> Here", action: current == nil ? nil : #selector(toggleSaveToProject),
-                                  keyEquivalent: "")
-        saveHere.target = self
-        saveHere.isEnabled = current != nil
-        saveHere.state = s.saveNotesToProject() ? .on : .off
-        saveHere.toolTip = "Copies each saved session to <project>/Meetings/<date>/ (also a checkbox on the save card)"
-        projects.addItem(saveHere)
         projectItem.submenu = projects
-        projectItem.toolTip = "Claude answers questions and suggests replies with this folder (and its CLAUDE.md) as context"
         menu.addItem(projectItem)
 
         let lang = s.language()
@@ -197,35 +172,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             langs.addItem(mi)
         }
         langItem.submenu = langs
-        langItem.toolTip = "Lock transcription to one language when the whole conversation is in it (most accurate)"
         menu.addItem(langItem)
 
-        let assist = NSMenuItem(title: "Auto-Suggest Replies", action: #selector(toggleAssist), keyEquivalent: "")
-        assist.toolTip = "Draft a short reply when someone says one of your trigger words (off = just highlight the line)"
-        assist.target = self
-        assist.state = s.assist() ? .on : .off
-        menu.addItem(assist)
-        let interview = NSMenuItem(title: "Interview Mode — Suggest for Every Question", action: #selector(toggleInterview),
-                                   keyEquivalent: "")
+        let interview = NSMenuItem(title: "Interview Mode", action: #selector(toggleInterview), keyEquivalent: "")
         interview.target = self
         interview.state = s.interview() ? .on : .off
+        interview.toolTip = "Suggest a reply for every question someone asks you"
         menu.addItem(interview)
-        let conn = NSMenuItem(title: "Use Connectors (Jira, Mail…) — Slower", action: #selector(toggleConnectors),
-                              keyEquivalent: "")
-        conn.target = self
-        conn.state = s.connectors() ? .on : .off
-        conn.toolTip = "Answers and replies may look things up with the connectors set up in Claude Code "
-            + "(claude mcp list), read-only. Adds a few seconds."
-        menu.addItem(conn)
-        let improve = NSMenuItem(title: "Improve Transcript After Recording (Slower, Uses Battery)",
-                                 action: #selector(toggleImprove), keyEquivalent: "")
-        improve.target = self
-        improve.state = s.improveAfterRecording() ? .on : .off
-        improve.toolTip = "Off: the live transcript is saved right away. Any session can be improved later: "
-            + "Notes → Improve Transcript."
-        menu.addItem(improve)
-        add(menu, "Names & Trigger Words…", #selector(editTriggerWords))
-        add(menu, "Suggest a Reply Now", #selector(suggestNow), key: "a", mods: [.option, .shift], enabled: state.recording)
         menu.addItem(.separator())
     }
 
@@ -256,6 +209,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openSessions() { actions.openSessions() }
     @objc private func openNotes() { actions.openNotes() }
     @objc private func showNotes() { actions.showNotes() }
+    @objc private func showSettings() { actions.showSettings() }
     @objc private func openLogs() { actions.openLogs() }
     @objc private func openConfig() { actions.openConfig() }
     @objc private func toggleAutoShow() { actions.toggleAutoShow() }

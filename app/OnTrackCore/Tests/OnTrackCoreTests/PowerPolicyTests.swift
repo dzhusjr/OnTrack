@@ -40,6 +40,6 @@ final class DeferredSaveTests: XCTestCase {
         reduce(&s, .deferredUntilPower)
         XCTAssertNil(s.endCard)
         XCTAssertEqual(s.mode, .hidden)
-        XCTAssertEqual(s.toast, "Saved — transcription will finish when your Mac is plugged in")
+        XCTAssertEqual(s.toast, "Saved. Transcription will finish when your Mac is plugged in")
     }
 }

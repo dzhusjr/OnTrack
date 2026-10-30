@@ -55,9 +55,9 @@ struct OverlayView: View {
             VStack(alignment: .leading, spacing: 5) {
                 if s.lines.isEmpty && s.partials.isEmpty {
                     Text(!s.modelReady ? "Loading speech model…"
-                         : !s.recording ? "Not recording — ⌥⇧S to start"
-                         : s.paused ? "Paused — nothing is recorded (⌥⇧P to resume)"
-                         : s.liveTranscription ? "Listening…" : "Recording only — transcribed when you save (⌥⇧L for live)")
+                         : !s.recording ? "Not recording. ⌥⇧S to start"
+                         : s.paused ? "Paused. Nothing is recorded (⌥⇧P to resume)"
+                         : s.liveTranscription ? "Listening…" : "Recording only. Transcribed when you save (⌥⇧L for live)")
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
                 let shown = s.visibleLines
@@ -107,7 +107,7 @@ struct OverlayView: View {
                         .controlSize(.mini)
                         .tint(.yellow.opacity(0.85))
                         .disabled(s.suggestion != nil && s.suggestion?.done == false)
-                        .help("Answer the latest question — or what's worth saying now (⌥⇧A)")
+                        .help("Answer the latest question. Or what's worth saying now (⌥⇧A)")
                 }
                 Button {
                     store.toggleLive()
@@ -116,7 +116,7 @@ struct OverlayView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(s.liveTranscription ? Color.secondary : Color.orange)
-                .help(s.liveTranscription ? "Pause live transcription (⌥⇧L) — audio keeps recording"
+                .help(s.liveTranscription ? "Pause live transcription (⌥⇧L). Audio keeps recording"
                                           : "Resume live transcription (⌥⇧L)")
                 Button {
                     store.send(.hide)
@@ -125,10 +125,10 @@ struct OverlayView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("Hide (Esc) — recording continues; ⌥Space shows it again")
+                .help("Hide (Esc). Recording continues; ⌥Space shows it again")
                 if s.recording && s.paused {
                     Image(systemName: "pause.fill").font(.system(size: 8)).foregroundStyle(.orange)
-                        .help("Paused — ⌥⇧P to resume")
+                        .help("Paused. ⌥⇧P to resume")
                 } else {
                     Circle().fill(s.recording ? Color.red : Color.gray).frame(width: 7, height: 7)
                 }
@@ -170,7 +170,7 @@ struct OverlayView: View {
             Spacer(minLength: 4)
             Button { store.send(.dismissSuggestion) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
-                .help("Dismiss — ⌥⇧A drafts a reply to the latest question")
+                .help("Dismiss. ⌥⇧A drafts a reply to the latest question")
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.yellow.opacity(0.12)))

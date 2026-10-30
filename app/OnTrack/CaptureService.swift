@@ -58,7 +58,7 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func startMic(voiceProcessing: Bool? = nil) {
         if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
-            report("Microphone access is off — allow OnTrack in System Settings → Privacy & Security → Microphone, then restart OnTrack.")
+            report("Microphone access is off. Allow OnTrack in System Settings → Privacy & Security → Microphone, then restart OnTrack.")
         }
         engine = AVAudioEngine()
         let input = engine.inputNode
@@ -98,7 +98,7 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
             try engine.start()
         } catch {
             if voiceProcessingOn {
-                NSLog("OnTrack: mic failed with voice processing (%@) — retrying without", error.localizedDescription)
+                NSLog("OnTrack: mic failed with voice processing (%@). Retrying without", error.localizedDescription)
                 input.removeTap(onBus: 0)
                 engine.stop()
                 startMic(voiceProcessing: false)
@@ -146,7 +146,7 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
         guard silentMicFrames > 3 * 16_000 else { return }
         silentMicFrames = 0
         if voiceProcessingOn {
-            NSLog("OnTrack: mic delivers digital silence with voice processing — restarting without echo cancellation")
+            NSLog("OnTrack: mic delivers digital silence with voice processing. Restarting without echo cancellation")
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.isRunning else { return }
                 self.stopMic()
@@ -191,7 +191,7 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
         } catch {
             if !systemIssueReported {
                 systemIssueReported = true
-                report("System audio unavailable — allow OnTrack in System Settings → Privacy & Security → Screen & System Audio Recording. (\(error.localizedDescription))")
+                report("System audio unavailable. Allow OnTrack in System Settings → Privacy & Security → Screen & System Audio Recording. (\(error.localizedDescription))")
             }
             scheduleSystemRetry()
         }
@@ -218,7 +218,7 @@ final class CaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        NSLog("OnTrack: system audio stopped: %@ — retrying", error.localizedDescription)
+        NSLog("OnTrack: system audio stopped: %@. Retrying", error.localizedDescription)
         DispatchQueue.main.async { [weak self] in
             self?.stream = nil
             self?.scheduleSystemRetry()

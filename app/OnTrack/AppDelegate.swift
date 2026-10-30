@@ -23,6 +23,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resumeSessionId: String?  // set while waiting for a restarted engine to resume our session
     private var lastFinalizeSessionId: String?
     private var pendingSummarySessionId: String?
+    private lazy var permissionsWindow = PermissionsWindowController(
+        voiceprintFile: settings.appSupportDir.appendingPathComponent("voiceprint.npy"),
+        enroll: { [weak self] in self?.startEnrollment() })
+
+    private lazy var settingsWindow = SettingsWindowController(actions: SettingsActions(
+        sessionOptionsChanged: { [weak self] in self?.sendSessionOptions() },
+        autoShowChanged: { [weak self] on in self?.store.setAutoShow(on) },
+        projectChanged: { [weak self] path in self?.setProject(path) },
+        saveToProjectChanged: { [weak self] in self?.refreshProjectSave() },
+        waitForPowerChanged: { [weak self] in
+            guard let self else { return }
+            if !self.settings.waitForPowerToFinalize, !self.queue.items.isEmpty {
+                self.store.showToast("Finishing \(self.queue.items.count) waiting session(s) now")
+            }
+            self.processQueue(force: false)
+        },
+        chooseFolder: { title, start in Self.pickFolder(title: title, start: start, prompt: "Choose") },
+        enroll: { [weak self] in self?.startEnrollment() },
+        showPermissions: { [weak self] in self?.permissionsWindow.show() },
+        showNotes: { [weak self] in self?.notesWindow.show() },
+        openConfig: { [weak self] in self?.openConfig() },
+        open: { [weak self] url in self?.open(url) }
+    ))
+
     private lazy var notesWindow: NotesWindowController = {
         let w = NotesWindowController(notesDir: settings.notesDir) { [weak self] id, question, sid in
             self?.client.send(.askAbout(id: id, question: question, sessionId: sid))
@@ -44,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.onImprove = { [weak self] sid in
             guard let self else { return }
             self.client.send(.improve(sessionId: sid))
-            self.store.showToast("Improving the transcript — accurate model + speakers (takes a few minutes)")
+            self.store.showToast("Improving the transcript. Accurate model + speakers (takes a few minutes)")
         }
         return w
     }()
@@ -137,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.settings.improveAfterRecording.toggle()
                     self.store.showToast(self.settings.improveAfterRecording
                         ? "After recording: accurate re-transcription + speakers (slower, uses battery)"
-                        : "After recording: keep the live transcript (fast) — improve any session later in Notes")
+                        : "After recording: keep the live transcript (fast). Improve any session later in Notes")
                 },
                 toggleSaveNotesToProject: { [weak self] in
                     guard let self else { return }
@@ -152,10 +176,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.settings.useConnectors.toggle()
                     self.sendSessionOptions()
                     self.store.showToast(self.settings.useConnectors
-                        ? "Connectors on — answers can check Jira etc. (a few seconds slower)" : "Connectors off — fastest answers")
+                        ? "Connectors on. Answers can check Jira etc. (a few seconds slower)" : "Connectors off. Fastest answers")
                 }
             ),
-            showNotes: { [weak self] in self?.notesWindow.show() }
+            showNotes: { [weak self] in self?.notesWindow.show() },
+            showSettings: { [weak self] in self?.settingsWindow.show() }
         ))
 
         store.onLiveToggled = { [weak self] on in self?.settings.liveByDefault = on }
@@ -163,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshProjectSave()
         power.onChange = { [weak self] onBattery in
             guard let self, !onBattery, !self.queue.items.isEmpty else { return }
-            self.store.showToast("Plugged in — finishing \(self.queue.items.count) saved session(s)")
+            self.store.showToast("Plugged in. Finishing \(self.queue.items.count) saved session(s)")
             self.processQueue(force: false)
         }
         power.start()
@@ -232,11 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.start()
         supervisor.startHealthChecks(client: client)
 
-        Task {
-            let micOK = await Permissions.requestMicrophone()
-            if !micOK { store.showIssue("Microphone access is off — OnTrack can't hear the room. Allow it in System Settings → Privacy & Security → Microphone.") }
-            if !Permissions.screenCaptureAllowed { Permissions.requestScreenCapture() }
-        }
+        if permissionsWindow.needed { permissionsWindow.show() }  // first run, or access was turned off
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -317,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard store.state.recording, desired != store.state.liveTranscription else { return }
         store.send(.toggleLive)
         if announce || !desired {
-            store.showToast(desired ? "Live transcription on" : "Recording only — transcribed when you save")
+            store.showToast(desired ? "Live transcription on" : "Recording only. Transcribed when you save")
         }
     }
 
@@ -414,7 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         sendSessionOptions()
-        store.showToast(settings.triggerWords.isEmpty ? "No names set — only the engine config's my_names are used"
+        store.showToast(settings.triggerWords.isEmpty ? "No names set. Only the engine config's my_names are used"
             : "Listening for: \(settings.triggerWords.prefix(4).joined(separator: ", "))\(settings.triggerWords.count > 4 ? "…" : "")")
     }
 
@@ -426,22 +447,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func togglePause() {
         guard store.state.recording else { return }
         store.send(.togglePause)
-        store.showToast(store.state.paused ? "Paused — nothing is recorded (⌥⇧P to resume)" : "Recording resumed")
+        store.showToast(store.state.paused ? "Paused. Nothing is recorded (⌥⇧P to resume)" : "Recording resumed")
     }
 
     private func toggleRecording(askName: Bool) {
         if store.state.engineState == "stopping" {  // second press while the last words are still transcribed
-            store.showToast("Stopping — finishing the last phrases…")
+            store.showToast("Stopping. Finishing the last phrases…")
             return
         }
         if store.state.recording {
             client.send(.stopSession)
-            store.showToast("Stopping — finishing the last phrases…")  // instant feedback; the save card follows
+            store.showToast("Stopping. Finishing the last phrases…")  // instant feedback; the save card follows
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.capture.stop() }
             return
         }
         guard ["idle", "postprocessing"].contains(store.state.engineState) else {
-            store.showIssue("The engine is \(store.state.engineState) — try again in a moment.")
+            store.showIssue("The engine is \(store.state.engineState). Try again in a moment.")
             return
         }
         // The previous session must be decided (and saved) before a new one starts: never decide for the user.
@@ -452,7 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if store.state.progress != nil, processingSessionId == nil {
             store.send(.showEndCard)
-            store.showToast("Still saving the previous session — you can start a new one when it's done")
+            store.showToast("Still saving the previous session. You can start a new one when it's done")
             return
         }
         if store.state.mode == .done { store.send(.dismiss) }
@@ -479,14 +500,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         enrolling = true
-        store.showToast("Listening — keep talking for 30 seconds…")
+        store.showToast("Listening. Keep talking for 30 seconds…")
         client.holdAudio()
         client.send(.enrollStart)
         capture.start(micOnly: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in  // engine never answered
             guard let self, self.enrolling else { return }
             self.finishEnrollment()
-            self.store.showIssue("Enrollment timed out — is the engine running? (menu → Open Logs)")
+            self.store.showIssue("Enrollment timed out. Is the engine running? (menu → Open Logs)")
         }
     }
 

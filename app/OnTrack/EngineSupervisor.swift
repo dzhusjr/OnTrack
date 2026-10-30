@@ -51,7 +51,7 @@ final class EngineSupervisor {
                     let since = self.unreachableSince ?? Date()
                     self.unreachableSince = since
                     if Date().timeIntervalSince(since) > 10 {
-                        NSLog("OnTrack: engine unreachable — restarting")
+                        NSLog("OnTrack: engine unreachable. Restarting")
                         self.unreachableSince = nil
                         self.restart()
                     }
@@ -61,7 +61,7 @@ final class EngineSupervisor {
             self.unreachableSince = nil
             self.missedPings += 1
             if self.missedPings > 10 {
-                NSLog("OnTrack: engine unresponsive — restarting")
+                NSLog("OnTrack: engine unresponsive. Restarting")
                 self.missedPings = 0
                 self.restart()
                 return
@@ -167,7 +167,7 @@ final class EngineSupervisor {
         guard proc === process else { return }
         process = nil
         guard shouldRun else { return }
-        NSLog("OnTrack: engine exited (%d) — restarting", proc.terminationStatus)
+        NSLog("OnTrack: engine exited (%d). Restarting", proc.terminationStatus)
         if Date().timeIntervalSince(lastLaunch) > 30 { restartBackoff.reset() }
         let delay = restartBackoff.next()  // ≤ 4 s, well inside the spec's 5 s restart budget
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.launch() }

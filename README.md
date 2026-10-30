@@ -89,6 +89,9 @@ defaults write com.ontrack.app engineDir "$PWD/engine"
 
 ### 4. First launch
 
+On first launch a **Permissions** card shows what OnTrack needs (Microphone, System audio, optional voiceprint) with a Grant button for each, then Relaunch. Open it again anytime: Settings (⌘,) → General → Permissions.
+
+
 1. OnTrack lives in the **menu bar** (no Dock icon). The first launch loads the speech model (~30 s).
 2. Allow **Microphone** when asked.
 3. Allow **Screen & System Audio Recording** (System Settings → Privacy & Security). OnTrack never records your screen — macOS uses this one permission for *system audio*, which is how it hears the other side of Zoom/Meet/Teams calls. Quit and reopen OnTrack after granting it.

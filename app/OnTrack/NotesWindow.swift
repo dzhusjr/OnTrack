@@ -80,7 +80,7 @@ final class NotesBrowserModel: ObservableObject {
             guard let p = pending else { return }
             let answer = p.answer.trimmingCharacters(in: .whitespacesAndNewlines)
             threads[p.sessionId, default: []].append(
-                QAExchange(question: p.question, answer: answer.isEmpty ? "_No answer — see menu → Open Logs._" : answer))
+                QAExchange(question: p.question, answer: answer.isEmpty ? "_No answer. See menu → Open Logs._" : answer))
             pending = nil
             reload()  // qa.md changed: the Q&A tab now has this question too
         default:

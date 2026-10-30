@@ -25,7 +25,7 @@ final class HotkeyService {
             NSLog("OnTrack: hotkey %u registered", id)
             return true
         }
-        NSLog("OnTrack: hotkey %u could not be registered (%d) — another app may own it", id, status)
+        NSLog("OnTrack: hotkey %u could not be registered (%d). Another app may own it", id, status)
         return false
     }
 

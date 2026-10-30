@@ -199,7 +199,7 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         s.endCard = nil
         s.progress = nil
         s.mode = s.recording ? .collapsed : .hidden
-        s.toast = "Saved — transcription will finish when your Mac is plugged in"
+        s.toast = "Saved. Transcription will finish when your Mac is plugged in"
     case let .requestSuggestion(id):
         guard s.recording || s.sessionId != nil else { return [] }
         s.suggestion = Suggestion(id: id)
@@ -244,7 +244,7 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         if s.mode == .finalizing || (s.mode == .hidden && s.progress != nil) {  // engine went away mid-save: let the user retry (saving is idempotent)
             s.mode = .endCard
             s.progress = nil
-            s.error = "The engine restarted while saving — choose again to retry."
+            s.error = "The engine restarted while saving. Choose again to retry."
         }
     }
     return []
@@ -298,7 +298,7 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         s.progress = nil
         s.endCard = nil
         s.mode = s.recording ? .collapsed : .hidden
-        s.toast = "Recording kept — continue from Pending transcription in Notes"
+        s.toast = "Recording kept. Continue from Pending transcription in Notes"
     case let .finalizeDone(sid, path):
         if s.recording, sid != s.sessionId {  // previous session finished saving while a new one records
             if !path.isEmpty { s.toast = "Previous session saved to notes" }
