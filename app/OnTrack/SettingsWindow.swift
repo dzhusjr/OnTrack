@@ -137,7 +137,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 ("Saving", "tray.and.arrow.down", AnyView(SavingTab(model: model))),
                 ("Advanced", "wrench.and.screwdriver", AnyView(AdvancedTab(model: model))),
             ] {
-                let vc = NSHostingController(rootView: view.frame(width: 520, height: 560).background(Color(nsColor: .windowBackgroundColor)))
+                let vc = NSHostingController(rootView: view.contentMargins(.top, 14, for: .scrollContent).frame(width: 520, height: 560).background(Color(nsColor: .windowBackgroundColor)))
                 vc.title = title
                 let item = NSTabViewItem(viewController: vc)
                 item.label = title
