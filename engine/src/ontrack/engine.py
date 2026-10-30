@@ -951,6 +951,9 @@ def main(argv: list[str] | None = None) -> int:
 
     svc = EngineService(cfg, real_backends(cfg), ClaudeRunner(cfg), diarizer=Lazy(diarizer),
                         fallback_asr=Lazy(fallback), final_asr=Lazy(final))
+    from .ai import dns_online
+
+    svc.runner.online_check = dns_online  # fail fast with a clear message instead of waiting for Claude offline
 
     async def run() -> None:
         loop = asyncio.get_running_loop()

@@ -197,6 +197,43 @@ def test_a_half_finished_local_answer_is_not_redone_on_claude():
     assert got == ["local "] and claude.calls == []
 
 
+# ---- offline ------------------------------------------------------------------------------------------
+def test_offline_claude_mode_fails_fast_and_says_how_to_work_offline():
+    claude = FakeClaude()
+    router, local, prov, _ = make("claude", claude)
+    router.online_check = lambda: False
+    with pytest.raises(LlmError) as e:
+        "".join(for_task(router, "quick").stream("q", 5))
+    assert e.value.code == "offline" and "Local first" in e.value.message and claude.calls == []
+
+
+def test_offline_local_first_uses_the_loaded_quick_model_for_every_task_even_project_questions(tmp_path):
+    claude = FakeClaude()
+    router, local, prov, _ = make("local_first", claude)  # no summary/project model chosen
+    ready(router, local)
+    router.online_check = lambda: False
+    assert "".join(for_task(router, "project").stream("about the talk", 5, project_dir=tmp_path, connectors=True)) == "local reply"
+    assert for_task(router, "summary").complete("s", 5) == "local reply"
+    assert claude.calls == [] and {p[1] for p in prov.prompts} == {QUICK}
+
+
+def test_offline_local_first_without_a_loaded_model_says_press_load():
+    router, local, prov, _ = make("local_first", FakeClaude())
+    router.online_check = lambda: False
+    with pytest.raises(LlmError) as e:
+        "".join(for_task(router, "project").stream("q", 5))
+    assert e.value.code == "offline" and "Load" in e.value.message
+
+
+def test_online_local_first_still_sends_project_questions_to_claude():
+    claude = FakeClaude()
+    router, local, prov, _ = make("local_first", claude)
+    ready(router, local)
+    router.online_check = lambda: True
+    "".join(for_task(router, "project").stream("q", 5))
+    assert claude.calls and prov.prompts == []
+
+
 # ---- privacy: local_only never reaches Claude -----------------------------------------------------
 def test_local_only_never_calls_claude_when_the_model_is_not_loaded():
     router, local, prov, _ = make("local_only", ForbiddenClaude())

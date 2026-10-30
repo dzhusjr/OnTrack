@@ -14,7 +14,7 @@ final class NotesBrowserModel: ObservableObject {
     @Published var query = ""
 
     // asking about a saved session
-    struct Pending: Equatable { let id: String; let sessionId: String; let question: String; var answer: String }
+    struct Pending: Equatable { let id: String; let sessionId: String; let question: String; var answer: String; var error = "" }
     @Published var question = ""
     @Published private(set) var threads: [String: [QAExchange]] = [:]  // per session, this window's questions
     @Published private(set) var pending: Pending?
@@ -71,16 +71,17 @@ final class NotesBrowserModel: ObservableObject {
             processingId = nil
             stopping = false
             reload()
-        case .error:
+        case let .error(err):
             processingId = nil
             stopping = false
+            if pending != nil { pending?.error = err.message }  // shown instead of an empty answer
         case let .answerDelta(id, text) where id == pending?.id:
             pending?.answer += text
         case let .answerDone(id) where id == pending?.id:
             guard let p = pending else { return }
             let answer = p.answer.trimmingCharacters(in: .whitespacesAndNewlines)
             threads[p.sessionId, default: []].append(
-                QAExchange(question: p.question, answer: answer.isEmpty ? "_No answer. See menu → Open Logs._" : answer))
+                QAExchange(question: p.question, answer: answer.isEmpty ? (p.error.isEmpty ? "_No answer. See menu → Open Logs._" : "_\(p.error)_") : answer))
             pending = nil
             reload()  // qa.md changed: the Q&A tab now has this question too
         default:
