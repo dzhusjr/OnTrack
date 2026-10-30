@@ -12,7 +12,29 @@ coding/creative-assistant integrations. It is a plan, not an enabled default.
   Test Qwen3-Coder 30B first, then Devstral Small 2 if memory spill makes it
   too slow. The model server should be activated only when requested.
 
-## Product work to plan
+## Implemented: optional local provider (first slice)
+
+Claude stays the default. The engine routes each request through `ai.AiRouter`:
+
+- **Modes** (`ai_mode`, Settings → Assistant → AI): `claude` (default), `local_first`, `local_only`.
+  `local_first` answers locally once the model is loaded and falls back to Claude if it is not loaded or fails
+  before answering (that request is then sent to Claude). `local_only` never calls Claude: it returns a clear error
+  instead. Connectors need Claude, so they are used only in `local_first`; project questions get no file tools locally.
+- **Lifecycle:** choosing a mode loads nothing. `local_ai start` (the **Load** button) loads the quick model,
+  `local_ai stop` (**Unload**) or switching back to Claude frees it. Models for summaries and project questions load
+  on first use while local AI is on and replace the resident one, so only one model is in memory.
+- **Models per task:** `local_model_quick` (default `mlx-community/Qwen3-4B-Instruct-2507-4bit`),
+  `local_model_summary`, `local_model_project`. Empty means Claude in `local_first`, the quick model in `local_only`.
+- **Providers:** MLX in-process (`mlx-lm`, loads only from the local Hugging Face cache, never downloads) and
+  Ollama over loopback only (`ollama_url`, native API, `keep_alive` honoured, unloaded on Unload).
+- **Status:** the engine sends `ai_status` (state, loaded model, memory for MLX, installed models, last route with
+  first-word latency). Settings shows it; the menu shows a line when a local mode is on.
+- **Not done yet:** an OpenAI-compatible endpoint, a Windows/Ollama profile for 30B coding models, idle auto-unload,
+  and benchmarks (first-token latency, tokens/s, peak RAM) on the fixed prompt set below.
+- **Check on a Mac:** `scripts/dev.sh local-ai` loads the model once, answers a prompt, prints load time, latency
+  and memory, then unloads.
+
+## Product work still to plan
 
 - Add an explicit local-provider setting (off by default) with a clear
   **Start local model** / **Stop local model** lifecycle so idle sessions do

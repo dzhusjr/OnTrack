@@ -12,6 +12,9 @@ models = [
   "pyannote.audio>=3.3",
 ]
 
+# Optional: run a language model locally (Settings → Assistant → AI). Installed by `scripts/dev.sh local-ai`.
+local-ai = ["mlx-lm>=0.21; sys_platform == 'darwin'"]
+
 [project.scripts]
 ontrack = "ontrack.cli:main"
 ontrack-engine = "ontrack.engine:main"

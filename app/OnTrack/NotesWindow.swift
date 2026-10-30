@@ -14,12 +14,14 @@ final class NotesBrowserModel: ObservableObject {
     @Published var query = ""
 
     // asking about a saved session
-    struct Pending: Equatable { let id: String; let sessionId: String; let question: String; var answer: String }
+    struct Pending: Equatable { let id: String; let sessionId: String; let question: String; var answer: String; var error = "" }
     @Published var question = ""
     @Published private(set) var threads: [String: [QAExchange]] = [:]  // per session, this window's questions
     @Published private(set) var pending: Pending?
     var ask: ((_ id: String, _ question: String, _ sessionId: String) -> Void)?
     var onImprove: ((String) -> Void)?
+    var onLoadLocal: (() -> Void)?  // the engine said the local model is needed but not loaded
+    @Published private(set) var needsLocalModel = false
     var audioDir: URL?
     var sessionsDir: URL?
     var onContinue: ((String) -> Void)?
@@ -53,6 +55,7 @@ final class NotesBrowserModel: ObservableObject {
         guard let s = selected, !q.isEmpty, pending == nil, let ask else { return }
         let id = "notes-" + UUID().uuidString
         pending = Pending(id: id, sessionId: s.id, question: q, answer: "")
+        needsLocalModel = false
         question = ""
         ask(id, q, s.id)
     }
@@ -71,16 +74,18 @@ final class NotesBrowserModel: ObservableObject {
             processingId = nil
             stopping = false
             reload()
-        case .error:
+        case let .error(err):
             processingId = nil
             stopping = false
+            if pending != nil { pending?.error = err.message }  // shown instead of an empty answer
+            if err.code == "local_not_loaded" || err.code == "offline" { needsLocalModel = true }
         case let .answerDelta(id, text) where id == pending?.id:
             pending?.answer += text
         case let .answerDone(id) where id == pending?.id:
             guard let p = pending else { return }
             let answer = p.answer.trimmingCharacters(in: .whitespacesAndNewlines)
             threads[p.sessionId, default: []].append(
-                QAExchange(question: p.question, answer: answer.isEmpty ? "_No answer. See menu → Open Logs._" : answer))
+                QAExchange(question: p.question, answer: answer.isEmpty ? (p.error.isEmpty ? "_No answer. See menu → Open Logs._" : "_\(p.error)_") : answer))
             pending = nil
             reload()  // qa.md changed: the Q&A tab now has this question too
         default:
@@ -132,6 +137,11 @@ final class NotesWindowController: NSObject, NSWindowDelegate {
     }
 
     func receive(_ msg: Inbound) { model.receive(msg) }
+
+    var onLoadLocal: (() -> Void)? {
+        get { model.onLoadLocal }
+        set { model.onLoadLocal = newValue }
+    }
 
     var onImprove: ((String) -> Void)? {
         get { model.onImprove }
@@ -370,6 +380,14 @@ private struct NotesAskBar: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 220)
+            }
+            if model.needsLocalModel && pending == nil {
+                HStack(spacing: 8) {
+                    Text("This question needs the local model, or an internet connection.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Load local model") { model.onLoadLocal?() }.controlSize(.small)
+                }
             }
             HStack(spacing: 8) {
                 Image(systemName: "sparkle.magnifyingglass").foregroundStyle(.secondary)

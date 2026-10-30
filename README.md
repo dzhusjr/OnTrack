@@ -9,6 +9,16 @@ Free, local, realtime transcription for lectures, meetings and in-person convers
 
 ## Install (fresh Mac, ~30 min, mostly downloads)
 
+### Quick install (one command)
+
+Open Terminal and paste:
+
+```bash
+git clone https://github.com/dzhusjr/OnTrack.git ~/Desktop/Work/OnTrack && ~/Desktop/Work/OnTrack/scripts/install.sh
+```
+
+It installs what is missing (Apple command-line tools, `uv`, optionally Claude Code), opens the Hugging Face pages you need to accept once, downloads the models, builds the app and opens it. It asks before installing anything optional, including the local AI model, and is safe to rerun if something stops halfway. You only need to log in to a free Hugging Face account and, if you want answers and summaries, a Claude subscription. The steps below explain each part, or let you do it by hand.
+
 ### 0. What you need
 
 - A Mac with **Apple Silicon** (M1 or newer) and **macOS 14 Sonoma** or newer. Intel Macs are not supported.
@@ -62,7 +72,7 @@ The app expects the repo at `~/Desktop/Work/OnTrack`:
 mkdir -p ~/Desktop/Work
 ```
 ```bash
-git clone git@github.com:dzhusjr/OnTrack.git ~/Desktop/Work/OnTrack
+git clone https://github.com/dzhusjr/OnTrack.git ~/Desktop/Work/OnTrack
 ```
 ```bash
 cd ~/Desktop/Work/OnTrack
@@ -81,11 +91,7 @@ What `all` does, in order:
 6. **Creates a local code-signing certificate** — macOS asks for your login password once. This makes macOS remember the app's permissions across rebuilds.
 7. **Runs the tests, builds the app** into `~/Applications/OnTrack.app` and opens it.
 
-If you cloned somewhere else, tell the app once:
-
-```bash
-defaults write com.ontrack.app engineDir "$PWD/engine"
-```
+If you cloned somewhere else, that is fine: `scripts/dev.sh app` tells the app where the engine is.
 
 ### 4. First launch
 
@@ -145,6 +151,7 @@ If you change a model in the engine config, run `scripts/dev.sh models` once to 
 | Interview / meeting helper | menu → Interview Mode: a short suggested reply for every question someone asks you. ⌥⇧A drafts one for the latest question anytime |
 | Work inside a project | menu → Project → Choose Folder… (e.g. your work repos). Questions and suggested replies then use that folder (read-only) and its CLAUDE.md as context. Saved sessions are also copied to `<project>/Meetings/<date>/` (checkbox on the save card, on by default) |
 | Connectors | menu → Use Connectors (Jira, Mail…) — Slower: answers and replies may look things up with the connectors set up in **Claude Code** (`claude mcp list`; add one with `claude mcp add`), read-only. Off = fastest. In a project folder Claude can also run read-only `git log/show/diff/status/branch` and `ls` |
+| Local AI (optional) | off by default; Claude answers everything. A separate install, never part of the main one: Settings → Assistant → **AI** shows an **Install** button (package plus about 2.5 GB model, once, needs internet). The installer also offers it at the end. Then choose *Local first* (local model when loaded, Claude otherwise) or *Local only* (nothing leaves the Mac; if the model is not loaded you get an error, never a Claude call), pick the engine (MLX or Ollama) and models for quick replies, summaries and project questions, and press **Load**. **Unload** frees the memory. Nothing loads at startup. Terminal alternative: `scripts/dev.sh local-ai`. Ollama: open the app and `ollama pull <model>` |
 | Speed | live questions and suggested replies use the fastest Claude model (`fast_llm_model = "haiku"`); the end-of-session summary uses `llm_model` (Sonnet) |
 | Whole conversation in one language | menu → Language → Українська / English / Nederlands. Most accurate; stops short phrases being "translated" into English |
 | End of session | overlay card: **Save summary + transcript** (Enter) · Transcript only · Discard (click twice) |

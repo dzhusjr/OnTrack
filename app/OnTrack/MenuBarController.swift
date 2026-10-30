@@ -12,6 +12,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var openNotes: () -> Void
         var openLogs: () -> Void
         var openConfig: () -> Void
+        var aiMenuLine: () -> String?  // nil while Claude is selected
         var toggleAutoShow: () -> Void
         var chooseExportFolder: () -> Void
         var clearExportFolder: () -> Void
@@ -129,6 +130,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                                 action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
+        if let line = actions.aiMenuLine() {
+            let ai = NSMenuItem(title: line, action: nil, keyEquivalent: "")
+            ai.isEnabled = false
+            menu.addItem(ai)
+        }
         add(menu, "Quit OnTrack", #selector(quit), key: "q")
     }
 

@@ -98,6 +98,7 @@ public struct OverlayState: Equatable {
     public var progress: FinalizeProgress?
     public var notesPath: String?
     public var error: String?
+    public var errorCode: String?  // lets the overlay offer a fix (e.g. load the local model)
     public var toast: String?
     private var lastSeq = -1
 
@@ -238,6 +239,7 @@ public func reduce(_ s: inout OverlayState, _ e: OverlayEvent) -> [Outbound] {
         }
     case .clearError:
         s.error = nil
+        s.errorCode = nil
         s.toast = nil
     case .disconnected:
         s.engineState = "disconnected"
@@ -333,12 +335,13 @@ private func reduceEngine(_ s: inout OverlayState, _ msg: Inbound) -> [Outbound]
         s.toast = String(format: "Voiceprint saved (match %.2f)", score)
     case let .error(err):
         s.error = err.message
+        s.errorCode = err.code
         // only a failed save reopens the card; warnings (speaker separation, summary) arrive while saving continues
         if (s.mode == .finalizing || s.progress != nil) && err.code == "finalize_failed" {
             s.mode = .endCard
             s.progress = nil
         }
-    case .pong, .unknown:
+    case .pong, .unknown, .aiStatus:  // local AI status is shown in Settings, not in the overlay
         break
     }
     return []

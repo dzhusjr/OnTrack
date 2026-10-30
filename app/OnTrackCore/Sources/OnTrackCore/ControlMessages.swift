@@ -41,6 +41,37 @@ public struct EngineStatus: Equatable, Sendable {
     }
 }
 
+/// Optional local AI (MLX / Ollama): what is chosen and whether a model is loaded right now.
+public struct AiStatus: Equatable, Sendable {
+    public var state: String  // off | loading | ready | error
+    public var mode: String  // claude | local_first | local_only
+    public var provider: String  // mlx | ollama
+    public var model: String  // the model in memory ("" when none)
+    public var message: String  // why it is not ready, in plain words
+    public var installed: [String]  // local models found for this provider
+    public var models: [String: String]  // chosen per task: quick, summary, project
+    public var last: String  // what answered the latest request
+    public var memoryMB: Int?
+    public var needsSetup: String  // "" | package | model: what Install would add
+    public var progress: Double?  // 0...1 while installing, nil when unknown
+
+    public init(state: String = "off", mode: String = "claude", provider: String = "mlx", model: String = "",
+                message: String = "", installed: [String] = [], models: [String: String] = [:], last: String = "",
+                memoryMB: Int? = nil, needsSetup: String = "", progress: Double? = nil) {
+        self.state = state
+        self.mode = mode
+        self.provider = provider
+        self.model = model
+        self.needsSetup = needsSetup
+        self.progress = progress
+        self.message = message
+        self.installed = installed
+        self.models = models
+        self.last = last
+        self.memoryMB = memoryMB
+    }
+}
+
 public struct EngineError: Equatable, Sendable {
     public let code: String
     public let message: String
@@ -68,6 +99,7 @@ public enum Inbound: Equatable, Sendable {
     case addressed(sessionId: String, seq: Int, reason: String, text: String)  // someone said your name / asked you
     case suggestionDelta(id: String, text: String)
     case suggestionDone(id: String)
+    case aiStatus(AiStatus)
     case error(EngineError)
     case unknown(String)
 
@@ -97,6 +129,15 @@ public enum Inbound: Equatable, Sendable {
         let code: String?
         let message: String?
         let recoverable: Bool?
+        let mode: String?
+        let provider: String?
+        let model: String?
+        let installed: [String]?
+        let models: [String: String]?
+        let last: String?
+        let memory_mb: Int?
+        let needs_setup: String?
+        let progress: Double?
     }
 
     public struct DecodeError: Error, Equatable {
@@ -136,6 +177,11 @@ public enum Inbound: Equatable, Sendable {
                               text: try need(r.text))
         case "suggestion_delta": return .suggestionDelta(id: try need(r.id), text: try need(r.text))
         case "suggestion_done": return .suggestionDone(id: try need(r.id))
+        case "ai_status":
+            return .aiStatus(AiStatus(state: try need(r.state), mode: try need(r.mode), provider: try need(r.provider),
+                                      model: r.model ?? "", message: r.message ?? "", installed: r.installed ?? [],
+                                      models: r.models ?? [:], last: r.last ?? "", memoryMB: r.memory_mb,
+                                      needsSetup: r.needs_setup ?? "", progress: r.progress))
         case "error":
             return .error(EngineError(code: try need(r.code), message: r.message ?? "", recoverable: r.recoverable ?? true))
         default: return .unknown(r.type)
@@ -165,6 +211,28 @@ public struct SessionOptions: Equatable, Sendable {
     }
 }
 
+/// Which AI answers what. Choosing a mode never loads anything; "Load" (`.localAi(.start)`) does.
+public struct AiSettings: Equatable, Sendable {
+    public var mode: String  // claude (default) | local_first (local when loaded, Claude otherwise) | local_only
+    public var provider: String  // mlx | ollama
+    public var quick: String  // model for live answers and replies
+    public var summary: String  // "" = Claude (local_first) / the quick model (local_only)
+    public var project: String  // "" = same rule, for questions about the project folder
+
+    public init(mode: String = "claude", provider: String = "mlx", quick: String = "", summary: String = "",
+                project: String = "") {
+        self.mode = mode
+        self.provider = provider
+        self.quick = quick
+        self.summary = summary
+        self.project = project
+    }
+}
+
+public enum LocalAiAction: String, Equatable, Sendable {
+    case start, stop, refresh, install
+}
+
 public enum FinalizeAction: String, Equatable, Sendable {
     case saveAll = "save_all"
     case transcriptOnly = "transcript_only"
@@ -188,11 +256,14 @@ public enum Outbound: Equatable, Sendable {
     case finalizeLight(sessionId: String, action: FinalizeAction)  // keep the live transcript + audio (no heavy pass)
     case deferProcessing(sessionId: String)
     case continueProcessing(sessionId: String)
+    case setAi(AiSettings)
+    case localAi(LocalAiAction)  // the local model is loaded only on .start
     case improve(sessionId: String)  // later: accurate re-transcription of a saved session from its kept audio
 
     public static let typeNames: Set<String> = [
         "ping", "start_session", "stop_session", "ask", "finalize", "retry_summary", "enroll_start", "set_config",
         "set_live", "set_paused", "set_session_options", "suggest", "improve", "defer_processing", "continue_processing",
+        "set_ai", "local_ai",
     ]
 
     public var jsonObject: [String: Any] {
@@ -217,6 +288,10 @@ public enum Outbound: Equatable, Sendable {
         case let .deferProcessing(sid): return ["type": "defer_processing", "session_id": sid]
         case let .continueProcessing(sid): return ["type": "continue_processing", "session_id": sid]
         case let .improve(sid): return ["type": "improve", "session_id": sid]
+        case let .setAi(a):
+            return ["type": "set_ai", "mode": a.mode, "provider": a.provider, "quick": a.quick, "summary": a.summary,
+                    "project": a.project]
+        case let .localAi(action): return ["type": "local_ai", "action": action.rawValue]
         }
     }
 

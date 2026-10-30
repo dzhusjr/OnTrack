@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         voiceprintFile: settings.appSupportDir.appendingPathComponent("voiceprint.npy"),
         enroll: { [weak self] in self?.startEnrollment() })
 
+    private let aiStatus = AiStatusModel()  // local AI state reported by the engine
+
     private lazy var settingsWindow = SettingsWindowController(actions: SettingsActions(
         sessionOptionsChanged: { [weak self] in self?.sendSessionOptions() },
         autoShowChanged: { [weak self] on in self?.store.setAutoShow(on) },
@@ -52,14 +54,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.supervisor.restart()
             }
         },
+        aiSettingsChanged: { [weak self] in self?.sendAiSettings() },
+        localAi: { [weak self] action in self?.client.send(.localAi(action)) },
         open: { [weak self] url in self?.open(url) }
-    ))
+    ), aiStatus: aiStatus)
 
     private lazy var notesWindow: NotesWindowController = {
         let w = NotesWindowController(notesDir: settings.notesDir) { [weak self] id, question, sid in
             self?.client.send(.askAbout(id: id, question: question, sessionId: sid))
         }
         w.sessionsDir = settings.sessionsDir
+        w.onLoadLocal = { [weak self] in self?.loadLocalModel() }
         w.onContinue = { [weak self] sid in
             guard let self else { return }
             if self.store.state.recording {
@@ -88,7 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     onOpenNotes: { [weak self] in
                                         self?.notesWindow.show(sessionId: URL(fileURLWithPath: $0).lastPathComponent)
                                     },
-                                    onOpenSettings: { $0 == "mic" ? Permissions.openMicrophoneSettings() : Permissions.openScreenCaptureSettings() },
+                                    onOpenSettings: { [weak self] key in
+                                        switch key {
+                                        case "mic": Permissions.openMicrophoneSettings()
+                                        case "load-local": self?.loadLocalModel()
+                                        case "ai": self?.settingsWindow.show()
+                                        default: Permissions.openScreenCaptureSettings()
+                                        }
+                                    },
                                     onSaveTo: { [weak self] in self?.saveTo(notesPath: $0) })
         menu = MenuBarController(actions: .init(
             startStop: { [weak self] in self?.toggleRecording(askName: true) },
@@ -99,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openNotes: { [weak self] in self?.open(self?.settings.notesDir) },
             openLogs: { [weak self] in self?.open(self?.settings.logsDir) },
             openConfig: { [weak self] in self?.openConfig() },
+            aiMenuLine: { [weak self] in self?.aiStatus.menuLine },
             toggleAutoShow: { [weak self] in
                 guard let self else { return }
                 self.settings.autoShowOverlay.toggle()
@@ -303,6 +316,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else if st.state == "recording" || st.state == "enrolling" {
                 client.releaseAudio()
             }
+        case let .aiStatus(s):
+            aiStatus.status = s
         case .enrollDone:
             finishEnrollment()
         case let .error(err):
@@ -380,6 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func connectionChanged(_ up: Bool) {
         if up {
             sendSessionOptions()  // a (re)started engine starts with defaults
+            sendAiSettings()  // the choice only; a local model is never loaded here, only by Load in Settings
             processingSessionId = nil  // a restarted engine forgot it: try again
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.processQueue(force: false) }
             // Engine restarted mid-session → resume the same session (spec §8). Audio stays buffered until confirmed.
@@ -395,6 +411,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: actions
+
+    /// The "Load local model" button next to an error: loads the model (never automatic), or opens Settings when
+    /// local AI is not chosen yet.
+    private func loadLocalModel() {
+        guard settings.aiMode != "claude", aiStatus.status.needsSetup.isEmpty else { settingsWindow.show(); return }  // Settings has the Install button
+        client.send(.localAi(.start))
+        store.showToast("Loading the local model. Ask again in a few seconds")
+    }
+
+    private func sendAiSettings() {
+        guard client.isConnected else { return }
+        client.send(.setAi(settings.aiSettings))
+    }
 
     private func sendSessionOptions() {
         guard client.isConnected else { return }
@@ -458,12 +487,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.showToast(store.state.paused ? "Paused. Nothing is recorded (⌥⇧P to resume)" : "Recording resumed")
     }
 
+    private var stopArmedUntil: Date?  // set by the first ⌥⇧S press while recording
+
     private func toggleRecording(askName: Bool) {
         if store.state.engineState == "stopping" {  // second press while the last words are still transcribed
             store.showToast("Stopping. Finishing the last phrases…")
             return
         }
         if store.state.recording {
+            // The shortcut sits next to ⌥⇧A (reply), so ending a session needs a second press within 4 seconds.
+            if !askName {
+                guard let until = stopArmedUntil, until > Date() else {
+                    stopArmedUntil = Date().addingTimeInterval(4)
+                    store.showToast("Press ⌥⇧S again to finish the session")
+                    return
+                }
+                stopArmedUntil = nil
+            }
             client.send(.stopSession)
             store.showToast("Stopping. Finishing the last phrases…")  // instant feedback; the save card follows
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.capture.stop() }

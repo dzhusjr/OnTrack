@@ -16,6 +16,8 @@ struct SettingsActions {
     var showNotes: () -> Void
     var openConfig: () -> Void
     var restartEngine: () -> Void
+    var aiSettingsChanged: () -> Void  // mode, engine or models changed (loads nothing)
+    var localAi: (LocalAiAction) -> Void  // start = load the local model, stop = free it
     var open: (URL) -> Void
 }
 
@@ -38,6 +40,12 @@ final class SettingsModel: ObservableObject {
     @Published var improveAfterRecording = false { didSet { guard loaded else { return }; settings.improveAfterRecording = improveAfterRecording } }
     @Published var waitForPower = false { didSet { guard loaded else { return }; settings.waitForPowerToFinalize = waitForPower; actions.waitForPowerChanged() } }
     @Published var exportFolder: URL?
+    // Optional local AI (off by default). Changing these never loads a model; the Load button does.
+    @Published var aiMode = "claude" { didSet { guard loaded else { return }; settings.aiMode = aiMode; aiChanged(refresh: true) } }
+    @Published var localProvider = "mlx" { didSet { guard loaded else { return }; settings.localProvider = localProvider; aiChanged(refresh: true) } }
+    @Published var localQuick = "" { didSet { guard loaded else { return }; settings.localModelQuick = localQuick; aiChanged(refresh: false) } }
+    @Published var localSummary = "" { didSet { guard loaded else { return }; settings.localModelSummary = localSummary; aiChanged(refresh: false) } }
+    @Published var localProject = "" { didSet { guard loaded else { return }; settings.localModelProject = localProject; aiChanged(refresh: false) } }
     @Published var hasVoiceprint = false
     @Published var micGranted = false
     @Published var systemAudioGranted = false
@@ -76,6 +84,11 @@ final class SettingsModel: ObservableObject {
         improveAfterRecording = settings.improveAfterRecording
         waitForPower = settings.waitForPowerToFinalize
         exportFolder = settings.exportFolder
+        aiMode = settings.aiMode
+        localProvider = settings.localProvider
+        localQuick = settings.localModelQuick
+        localSummary = settings.localModelSummary
+        localProject = settings.localModelProject
         loadEngine()
         hasVoiceprint = FileManager.default.fileExists(atPath: settings.appSupportDir.appendingPathComponent("voiceprint.npy").path)
         micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
@@ -158,6 +171,11 @@ final class SettingsModel: ObservableObject {
         languages = Self.detectable.map(\.code).filter(codes.contains).joined(separator: ", ")
     }
 
+    private func aiChanged(refresh: Bool) {
+        actions.aiSettingsChanged()
+        if refresh { actions.localAi(.refresh) }  // lists installed models and what is missing, loads nothing
+    }
+
     func restartEngine() {
         commitEngine()
         engineChanged = false
@@ -199,6 +217,24 @@ final class SettingsModel: ObservableObject {
     }
 }
 
+/// The engine's latest local AI status (shared by Settings and the menu).
+@MainActor
+final class AiStatusModel: ObservableObject {
+    @Published var status = AiStatus()
+
+    /// One line for the menu bar; nil while Claude is selected (the default).
+    var menuLine: String? {
+        guard status.mode != "claude" else { return nil }
+        let mode = status.mode == "local_only" ? "Local only" : "Local first"
+        switch status.state {
+        case "ready": return "AI: \(mode), \(status.model.split(separator: "/").last.map(String.init) ?? "ready")"
+        case "loading": return "AI: \(mode), loading…"
+        case "error": return "AI: \(mode), not available"
+        default: return "AI: \(mode), not loaded"
+        }
+    }
+}
+
 // MARK: window
 
 @MainActor
@@ -206,10 +242,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: SettingsModel
 
-    init(actions: SettingsActions) { model = SettingsModel(actions: actions) }
+    let aiStatus: AiStatusModel
+
+    init(actions: SettingsActions, aiStatus: AiStatusModel) {
+        self.aiStatus = aiStatus
+        model = SettingsModel(actions: actions)
+    }
 
     func show() {
         model.reload()
+        model.actions.localAi(.refresh)  // cheap: checks what is installed, loads nothing
         if window == nil {
             // Native preferences look: tabs as toolbar icons, window titled after the tab.
             let tabs = NSTabViewController()
@@ -217,7 +259,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             tabs.canPropagateSelectedChildViewControllerTitle = true
             for (title, icon, view) in [
                 ("General", "gearshape", AnyView(GeneralTab(model: model))),
-                ("Assistant", "sparkles", AnyView(AssistantTab(model: model))),
+                ("Assistant", "sparkles", AnyView(AssistantTab(model: model, ai: aiStatus))),
                 ("Saving", "tray.and.arrow.down", AnyView(SavingTab(model: model))),
                 ("Advanced", "wrench.and.screwdriver", AnyView(AdvancedTab(model: model))),
             ] {
@@ -314,7 +356,90 @@ private struct GeneralTab: View {
 
 private struct AssistantTab: View {
     @ObservedObject var model: SettingsModel
+    @ObservedObject var ai: AiStatusModel
     @FocusState private var namesFocused: Bool
+
+    private var aiModeCaption: String {
+        switch model.aiMode {
+        case "local_first": return "Uses the local model once you load it. If it is not loaded or fails, Claude answers instead, so that request is sent to Claude."
+        case "local_only": return "Nothing leaves this Mac. If the local model is not loaded or fails, you see an error and Claude is never used."
+        default: return "Questions, replies and summaries use Claude through Claude Code. No local model is loaded."
+        }
+    }
+
+    private static func short(_ id: String) -> String { id.split(separator: "/").last.map(String.init) ?? id }
+
+    private func modelPicker(_ title: String, _ caption: String, _ selection: Binding<String>, allowEmpty: Bool) -> some View {
+        var ids = ai.status.installed
+        if !selection.wrappedValue.isEmpty, !ids.contains(selection.wrappedValue) { ids.append(selection.wrappedValue) }
+        return Picker(selection: selection) {
+            if allowEmpty { Text(model.aiMode == "local_only" ? "Same as quick replies" : "Claude").tag("") }
+            ForEach(ids, id: \.self) { Text(Self.short($0) + (ai.status.installed.contains($0) ? "" : " (not found)")).tag($0) }
+        } label: {
+            Text(title)
+            Text(caption)
+        }
+    }
+
+    /// One button installs everything the local model needs. It never loads the model.
+    private var installRow: some View {
+        let busy = ai.status.state == "installing"
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(busy ? "Installing local AI…" : "Local AI is not installed")
+                    Caption(busy ? (ai.status.message.isEmpty ? "This can take a few minutes." : ai.status.message)
+                                 : "Run the model on this Mac, offline and private. About 2.5 GB, downloaded once. Nothing loads until you press Load.")
+                }
+                Spacer()
+                Button("Install") { model.actions.localAi(.install) }.disabled(busy)
+            }
+            if busy {
+                if let p = ai.status.progress { ProgressView(value: p) } else { ProgressView().controlSize(.small) }
+            } else if ai.status.state == "error" && !ai.status.message.isEmpty {
+                Caption(ai.status.message)
+            }
+        }
+    }
+
+    private var statusTitle: String {
+        switch ai.status.state {
+        case "ready": return "Loaded: \(Self.short(ai.status.model))" + (ai.status.memoryMB.map { String(format: " (%.1f GB)", Double($0) / 1000) } ?? "")
+        case "loading": return "Loading…"
+        case "installing": return "Installing…"
+        case "error": return "Not available"
+        default: return "Not loaded"
+        }
+    }
+
+    private var statusIcon: String {
+        switch ai.status.state {
+        case "ready": return "checkmark.circle.fill"
+        case "loading", "installing": return "hourglass"
+        case "error": return "exclamationmark.triangle.fill"
+        default: return "circle"
+        }
+    }
+
+    private var statusColor: Color {
+        switch ai.status.state {
+        case "ready": return .green
+        case "error": return .orange
+        default: return .primary
+        }
+    }
+
+    private var statusDetail: String {
+        if !ai.status.message.isEmpty { return ai.status.message }
+        switch ai.status.state {
+        case "ready": return ai.status.last.isEmpty ? "Answers locally. Unload to free the memory."
+                                                    : "Last answer: \(ai.status.last). Unload to free the memory."
+        case "loading": return "This can take a few seconds."
+        default:
+            let last = ai.status.last.isEmpty ? "" : " Last answer: \(ai.status.last)."
+            return "Uses no memory until you press Load." + last
+        }
+    }
 
     var body: some View {
         Form {
@@ -355,6 +480,46 @@ private struct AssistantTab: View {
                     Text("Use connectors (Jira, mail, calendar)")
                     Text(model.connectors ? "Claude checks your Claude Code connectors when a question needs them. Adds a few seconds."
                                           : "Off. Fastest answers, from the talk, your project and git only.")
+                }
+            }
+            Section("AI") {
+                if model.localProvider == "mlx" && (!ai.status.needsSetup.isEmpty || ai.status.state == "installing") {
+                    installRow
+                }
+                Picker(selection: $model.aiMode) {
+                    Text("Claude").tag("claude")
+                    Text("Local first").tag("local_first")
+                    Text("Local only").tag("local_only")
+                } label: {
+                    Text("Answer with")
+                    Text(aiModeCaption)
+                }
+                if model.aiMode != "claude" {
+                    Picker(selection: $model.localProvider) {
+                        Text("MLX (built in)").tag("mlx")
+                        Text("Ollama").tag("ollama")
+                    } label: {
+                        Text("Local engine")
+                        Text(model.localProvider == "mlx" ? "Runs inside OnTrack. Use Install above if it is not set up yet."
+                                                          : "Uses the Ollama app on this Mac. Open it first.")
+                    }
+                    modelPicker("Quick replies", "Live answers and suggested replies.", $model.localQuick, allowEmpty: false)
+                    modelPicker("Summaries", "Notes after a session.", $model.localSummary, allowEmpty: true)
+                    modelPicker("Project questions", "Answers about your project folder. A local model cannot read files, it only sees the talk and your recent work.",
+                                $model.localProject, allowEmpty: true)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label(statusTitle, systemImage: statusIcon).foregroundStyle(statusColor)
+                            Caption(statusDetail)
+                        }
+                        Spacer()
+                        if ai.status.state == "ready" {
+                            Button("Unload") { model.actions.localAi(.stop) }
+                        } else {
+                            Button("Load") { model.actions.localAi(.start) }
+                                .disabled(["loading", "installing"].contains(ai.status.state) || !ai.status.needsSetup.isEmpty)
+                        }
+                    }
                 }
             }
             Section("Project folder") {

@@ -116,6 +116,36 @@ struct Settings {
         nonmutating set { defaults.set(newValue, forKey: "useConnectors") }
     }
 
+    // Optional local AI. Claude is the default; choosing a local mode never loads a model by itself.
+    static let defaultLocalQuickModel = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+
+    /// claude | local_first | local_only
+    var aiMode: String {
+        get { defaults.string(forKey: "aiMode") ?? "claude" }
+        nonmutating set { defaults.set(newValue, forKey: "aiMode") }
+    }
+    /// mlx | ollama
+    var localProvider: String {
+        get { defaults.string(forKey: "localProvider") ?? "mlx" }
+        nonmutating set { defaults.set(newValue, forKey: "localProvider") }
+    }
+    var localModelQuick: String {
+        get { defaults.string(forKey: "localModelQuick") ?? Self.defaultLocalQuickModel }
+        nonmutating set { defaults.set(newValue, forKey: "localModelQuick") }
+    }
+    var localModelSummary: String {
+        get { defaults.string(forKey: "localModelSummary") ?? "" }
+        nonmutating set { defaults.set(newValue, forKey: "localModelSummary") }
+    }
+    var localModelProject: String {
+        get { defaults.string(forKey: "localModelProject") ?? "" }
+        nonmutating set { defaults.set(newValue, forKey: "localModelProject") }
+    }
+    var aiSettings: AiSettings {
+        AiSettings(mode: aiMode, provider: localProvider, quick: localModelQuick, summary: localModelSummary,
+                   project: localModelProject)
+    }
+
     var sessionOptions: SessionOptions {
         SessionOptions(projectDir: projectDir, languages: sessionLanguage == "auto" ? [] : [sessionLanguage],
                        assist: suggestReplies, interview: interviewMode, names: triggerWords, connectors: useConnectors)

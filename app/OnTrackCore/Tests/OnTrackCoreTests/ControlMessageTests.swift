@@ -17,7 +17,7 @@ final class ControlMessageTests: XCTestCase {
             if case .unknown = msg { XCTFail("unknown: \(type)") }
             decoded += 1
         }
-        XCTAssertEqual(decoded, 15)
+        XCTAssertEqual(decoded, 16)
     }
 
     func testOutboundEncodingMatchesGolden() throws {
@@ -39,6 +39,8 @@ final class ControlMessageTests: XCTestCase {
             "improve": .improve(sessionId: "2026-10-23-1405-linear-algebra"),
             "defer_processing": .deferProcessing(sessionId: "2026-10-23-1405-linear-algebra"),
             "continue_processing": .continueProcessing(sessionId: "2026-10-23-1405-linear-algebra"),
+            "set_ai": .setAi(AiSettings(mode: "local_first", provider: "mlx", quick: "mlx-community/Qwen3-4B-Instruct-2507-4bit")),
+            "local_ai": .localAi(.start),
         ]
         var seen = 0
         for line in try goldenLines() {
@@ -57,6 +59,16 @@ final class ControlMessageTests: XCTestCase {
         let raw = #"{"type":"line","session_id":"s","seq":4,"speaker":"Other","t_start":1.5,"t_end":2.0,"lang":"ru","text":"Привет"}"#
         guard case let .line(l) = try Inbound.decode(Data(raw.utf8)) else { return XCTFail() }
         XCTAssertEqual(l, TranscriptLine(sessionId: "s", seq: 4, speaker: "Other", tStart: 1.5, tEnd: 2.0, lang: "ru", text: "Привет"))
+    }
+
+    func testAiStatusDecodesAndToleratesMissingOptionalFields() throws {
+        let raw = #"{"type":"ai_status","state":"ready","mode":"local_only","provider":"ollama","model":"qwen3:4b","installed":["qwen3:4b"],"models":{"quick":"qwen3:4b"},"memory_mb":2400,"needs_setup":"model","progress":0.5}"#
+        guard case let .aiStatus(s) = try Inbound.decode(Data(raw.utf8)) else { return XCTFail() }
+        XCTAssertEqual(s, AiStatus(state: "ready", mode: "local_only", provider: "ollama", model: "qwen3:4b",
+                                   installed: ["qwen3:4b"], models: ["quick": "qwen3:4b"], memoryMB: 2400, needsSetup: "model", progress: 0.5))
+        guard case let .aiStatus(bare) = try Inbound.decode(Data(#"{"type":"ai_status","state":"off","mode":"claude","provider":"mlx"}"#.utf8))
+        else { return XCTFail() }
+        XCTAssertEqual(bare, AiStatus())
     }
 
     func testUnknownTypeIsTolerated() throws {
