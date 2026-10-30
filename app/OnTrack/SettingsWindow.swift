@@ -343,10 +343,8 @@ private struct AssistantTab: View {
                     Text(model.interview ? "A reply appears for every question someone asks, from general knowledge, without your project."
                                          : "Off. Replies only when someone says your name.")
                 }
-                if model.interview {
-                    EngineField(title: "About me", caption: "One line so interview answers fit you, e.g. a backend engineer (Python, Go).",
-                                prompt: "a software engineer", text: $model.aboutMe, commit: model.commitEngine)
-                }
+                EngineField(title: "About me", caption: "One line so Interview Mode answers fit you, e.g. a backend engineer (Python, Go).",
+                            prompt: "a software engineer", text: $model.aboutMe, commit: model.commitEngine)
                 Toggle(isOn: $model.collectSpeech) {
                     Text("Learn how I speak")
                     Text(model.collectSpeech ? "Your lines are kept on this Mac so replies sound like you."
