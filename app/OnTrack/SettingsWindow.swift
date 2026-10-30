@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import OnTrackCore
 import SwiftUI
 
 /// What the Settings window can ask the app to do (it owns the engine connection and the overlay).
@@ -14,6 +15,7 @@ struct SettingsActions {
     var showPermissions: () -> Void
     var showNotes: () -> Void
     var openConfig: () -> Void
+    var restartEngine: () -> Void
     var open: (URL) -> Void
 }
 
@@ -74,10 +76,84 @@ final class SettingsModel: ObservableObject {
         improveAfterRecording = settings.improveAfterRecording
         waitForPower = settings.waitForPowerToFinalize
         exportFolder = settings.exportFolder
+        loadEngine()
         hasVoiceprint = FileManager.default.fileExists(atPath: settings.appSupportDir.appendingPathComponent("voiceprint.npy").path)
         micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         systemAudioGranted = Permissions.screenCaptureAllowed
         loaded = true
+    }
+
+
+    // MARK: engine config (config.toml); empty = the engine's default
+    static let engineDefaults: [String: String] = [
+        "whisper_model": "mlx-community/whisper-large-v3-turbo",
+        "final_whisper_model": "mlx-community/whisper-large-v3-mlx",
+        "llm_model": "sonnet",
+        "fast_llm_model": "haiku",
+        "allowed_langs": "en, nl, uk",
+    ]
+    @Published var liveModel = ""
+    @Published var finalModel = ""
+    @Published var summaryModel = ""
+    @Published var fastModel = ""
+    @Published var aboutMe = ""
+    @Published var vocabulary = ""
+    @Published var languages = ""
+    @Published var livePreview = true { didSet { guard loaded else { return }; commitEngine() } }
+    @Published var collectSpeech = true { didSet { guard loaded else { return }; commitEngine() } }
+    @Published var engineChanged = false  // saved, but the engine only reads it at launch
+
+    private var configFile: URL { settings.configFile }
+
+    private func loadEngine() {
+        let c = EngineConfigFile(url: configFile)
+        liveModel = c.string("whisper_model") ?? ""
+        finalModel = c.string("final_whisper_model") ?? ""
+        summaryModel = c.string("llm_model") ?? ""
+        fastModel = c.string("fast_llm_model") ?? ""
+        aboutMe = c.string("about_me") ?? ""
+        vocabulary = (c.strings("vocabulary") ?? []).joined(separator: ", ")
+        languages = (c.strings("allowed_langs") ?? []).joined(separator: ", ")
+        livePreview = c.bool("live_preview") ?? true
+        collectSpeech = c.bool("collect_my_speech") ?? true
+    }
+
+    private static func list(_ s: String) -> [String] {
+        s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// Writes the fields to config.toml. A field equal to the default (or empty) removes its key.
+    func commitEngine() {
+        var c = EngineConfigFile(url: configFile)
+        let before = c.text
+        func text(_ key: String, _ value: String) {
+            let v = value.trimmingCharacters(in: .whitespaces)
+            c.set(key, string: v.isEmpty || v == Self.engineDefaults[key] ? nil : v)
+        }
+        text("whisper_model", liveModel)
+        text("final_whisper_model", finalModel)
+        text("llm_model", summaryModel)
+        text("fast_llm_model", fastModel)
+        text("about_me", aboutMe)
+        let vocab = Self.list(vocabulary)
+        c.set("vocabulary", strings: vocab.isEmpty ? nil : vocab)
+        let langs = Self.list(languages).map { $0.lowercased() }
+        c.set("allowed_langs", strings: langs.isEmpty || langs == ["en", "nl", "uk"] ? nil : langs)
+        c.set("live_preview", bool: livePreview ? nil : false)
+        c.set("collect_my_speech", bool: collectSpeech ? nil : false)
+        guard c.text != before else { return }
+        do {
+            try c.write(to: configFile)
+            engineChanged = true
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    func restartEngine() {
+        commitEngine()
+        engineChanged = false
+        actions.restartEngine()
     }
 
     var notesDir: URL { settings.notesDir }
@@ -338,14 +414,44 @@ private struct AdvancedTab: View {
 
     var body: some View {
         Form {
+            Section("Transcription") {
+                EngineField(title: "Live model", caption: "Used while people speak. A Hugging Face MLX Whisper repo.",
+                            prompt: SettingsModel.engineDefaults["whisper_model"]!, text: $model.liveModel, commit: model.commitEngine)
+                EngineField(title: "Saved transcript model", caption: "Used when a session is improved. Slower and more accurate.",
+                            prompt: SettingsModel.engineDefaults["final_whisper_model"]!, text: $model.finalModel, commit: model.commitEngine)
+                EngineField(title: "Languages", caption: "Codes the engine may pick from, separated by commas. Add ru only if you want Russian output.",
+                            prompt: SettingsModel.engineDefaults["allowed_langs"]!, text: $model.languages, commit: model.commitEngine)
+                EngineField(title: "Vocabulary", caption: "Names and terms Whisper should spell right, separated by commas.",
+                            prompt: "Kubernetes, eigenvalue", text: $model.vocabulary, commit: model.commitEngine)
+                Toggle(isOn: $model.livePreview) {
+                    Text("Word-by-word preview")
+                    Text(model.livePreview ? "A grey preview line while someone speaks. Uses more battery."
+                                           : "Lines appear once a phrase is finished. Easier on the battery.")
+                }
+            }
+            Section("Claude") {
+                EngineField(title: "Summary model", caption: "Writes the end-of-session notes.",
+                            prompt: SettingsModel.engineDefaults["llm_model"]!, text: $model.summaryModel, commit: model.commitEngine)
+                EngineField(title: "Fast model", caption: "Answers live questions and drafts replies.",
+                            prompt: SettingsModel.engineDefaults["fast_llm_model"]!, text: $model.fastModel, commit: model.commitEngine)
+                EngineField(title: "About me", caption: "One line for Interview Mode, e.g. a backend engineer (Python, Go).",
+                            prompt: "a software engineer", text: $model.aboutMe, commit: model.commitEngine)
+                Toggle(isOn: $model.collectSpeech) {
+                    Text("Learn how I speak")
+                    Text(model.collectSpeech ? "Your lines are kept on this Mac so replies sound like you."
+                                             : "Replies use a neutral, polite style.")
+                }
+            }
             Section("Engine") {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Engine config")
-                        Caption("Models, about_me for interview answers, vocabulary. Restart OnTrack after editing.")
+                        Text(model.engineChanged ? "Restart to apply" : "Config file")
+                        Caption(model.engineChanged ? "Changes are saved. The engine reads them when it starts."
+                                                    : "Everything else (thresholds, timeouts) lives in config.toml.")
                     }
                     Spacer()
-                    Button("Edit…") { model.actions.openConfig() }
+                    if model.engineChanged { Button("Restart Engine") { model.restartEngine() }.buttonStyle(.borderedProminent) }
+                    Button("Open File…") { model.actions.openConfig() }
                 }
             }
             Section("Folders") {
@@ -354,6 +460,30 @@ private struct AdvancedTab: View {
             }
         }
         .formStyle(.grouped)
+        .onDisappear { model.commitEngine() }
+    }
+}
+
+/// A text setting with its explanation underneath; saved on Return or when the field loses focus.
+private struct EngineField: View {
+    let title: String
+    let caption: String
+    let prompt: String
+    @Binding var text: String
+    let commit: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+            TextField(title, text: $text, prompt: Text(prompt))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit(commit)
+                .onChange(of: focused) { _, now in if !now { commit() } }
+            Caption(caption)
+        }
     }
 }
 

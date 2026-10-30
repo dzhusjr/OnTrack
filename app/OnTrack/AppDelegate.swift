@@ -44,6 +44,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showPermissions: { [weak self] in self?.permissionsWindow.show() },
         showNotes: { [weak self] in self?.notesWindow.show() },
         openConfig: { [weak self] in self?.openConfig() },
+        restartEngine: { [weak self] in
+            guard let self else { return }
+            if self.store.state.recording {
+                self.store.showIssue("Finish the current recording first, then restart the engine.")
+            } else {
+                self.supervisor.restart()
+            }
+        },
         open: { [weak self] url in self?.open(url) }
     ))
 
