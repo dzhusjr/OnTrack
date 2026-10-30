@@ -283,6 +283,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Language codes switched on for transcription (read fresh from the config file).
+    var enabledLanguageCodes: [String] {
+        model.reload()
+        return SettingsModel.detectable.map(\.code).filter(model.detects)
+    }
+
     func windowDidBecomeKey(_ notification: Notification) { model.reload() }
 
     func windowWillClose(_ notification: Notification) {

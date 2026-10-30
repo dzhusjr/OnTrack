@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlay: OverlayController!
     private var cancellables: Set<AnyCancellable> = []
     private var enrolling = false
+    private let enrollmentWindow = EnrollmentWindowController()
     private var resumeSessionId: String?  // set while waiting for a restarted engine to resume our session
     private var lastFinalizeSessionId: String?
     private var pendingSummarySessionId: String?
@@ -540,13 +541,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startEnrollment() {
-        let alert = NSAlert()
-        alert.messageText = "Enroll your voice"
-        alert.informativeText = "After you click Start, talk normally for 30 seconds (read something aloud, any language). OnTrack uses this to tell you apart from other people in the room."
-        alert.addButton(withTitle: "Start")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard !enrolling else { return }
+        enrollmentWindow.show(enabledLanguages: settingsWindow.enabledLanguageCodes) { [weak self] in
+            self?.beginEnrollment()
+        }
+    }
+
+    private func beginEnrollment() {
         enrolling = true
         store.showToast("Listening. Keep talking for 30 seconds…")
         client.holdAudio()
@@ -561,6 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishEnrollment() {
         enrolling = false
+        enrollmentWindow.close()
         capture.stop()
     }
 
