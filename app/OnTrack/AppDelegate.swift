@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.client.send(.askAbout(id: id, question: question, sessionId: sid))
         }
         w.sessionsDir = settings.sessionsDir
+        w.onLoadLocal = { [weak self] in self?.loadLocalModel() }
         w.onContinue = { [weak self] sid in
             guard let self else { return }
             if self.store.state.recording {
@@ -92,7 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     onOpenNotes: { [weak self] in
                                         self?.notesWindow.show(sessionId: URL(fileURLWithPath: $0).lastPathComponent)
                                     },
-                                    onOpenSettings: { $0 == "mic" ? Permissions.openMicrophoneSettings() : Permissions.openScreenCaptureSettings() },
+                                    onOpenSettings: { [weak self] key in
+                                        switch key {
+                                        case "mic": Permissions.openMicrophoneSettings()
+                                        case "load-local": self?.loadLocalModel()
+                                        case "ai": self?.settingsWindow.show()
+                                        default: Permissions.openScreenCaptureSettings()
+                                        }
+                                    },
                                     onSaveTo: { [weak self] in self?.saveTo(notesPath: $0) })
         menu = MenuBarController(actions: .init(
             startStop: { [weak self] in self?.toggleRecording(askName: true) },
@@ -403,6 +411,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: actions
+
+    /// The "Load local model" button next to an error: loads the model (never automatic), or opens Settings when
+    /// local AI is not chosen yet.
+    private func loadLocalModel() {
+        guard settings.aiMode != "claude" else { settingsWindow.show(); return }
+        client.send(.localAi(.start))
+        store.showToast("Loading the local model. Ask again in a few seconds")
+    }
 
     private func sendAiSettings() {
         guard client.isConnected else { return }

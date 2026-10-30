@@ -222,7 +222,7 @@ def test_offline_local_first_without_a_loaded_model_says_press_load():
     router.online_check = lambda: False
     with pytest.raises(LlmError) as e:
         "".join(for_task(router, "project").stream("q", 5))
-    assert e.value.code == "offline" and "Load" in e.value.message
+    assert e.value.code == "local_not_loaded" and "Load" in e.value.message
 
 
 def test_online_local_first_still_sends_project_questions_to_claude():

@@ -97,7 +97,8 @@ class AiRouter:
                 return "local", quick, "offline"
             hint = ("Press Load in Settings → Assistant to use the local model." if local.mode != "claude" else
                     "To work offline, choose Local first or Local only in Settings → Assistant and press Load.")
-            raise LlmError("offline", f"No internet, so Claude can't answer. {hint}")
+            code = "local_not_loaded" if local.mode != "claude" else "offline"  # the app offers Load / Open Settings
+            raise LlmError(code, f"No internet, so Claude can't answer. {hint}")
         return provider, model, why
 
     def _route(self, task: str, connectors: bool) -> tuple[str, str, str]:

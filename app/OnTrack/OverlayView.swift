@@ -29,7 +29,7 @@ struct OverlayView: View {
             case .done:
                 doneCard
             }
-            if let err = s.error { banner(err, color: .red) }
+            if let err = s.error { banner(err, color: .red, code: s.errorCode) }
             if let toast = s.toast { banner(toast, color: .green) }
         }
         .padding(14)
@@ -264,13 +264,17 @@ struct OverlayView: View {
         }
     }
 
-    private func banner(_ text: String, color: Color) -> some View {
+    private func banner(_ text: String, color: Color, code: String? = nil) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: color == .red ? "exclamationmark.triangle.fill" : "checkmark.circle")
                 .foregroundStyle(color)
             Text(text).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
             Spacer()
-            if text.contains("Screen & System Audio Recording") {
+            if code == "local_not_loaded" {
+                Button("Load local model") { onOpenSettings("load-local") }.controlSize(.small)
+            } else if code == "offline" {
+                Button("Open AI Settings") { onOpenSettings("ai") }.controlSize(.small)
+            } else if text.contains("Screen & System Audio Recording") {
                 Button("Open Settings") { onOpenSettings("screen") }.controlSize(.small)
             } else if text.localizedCaseInsensitiveContains("microphone") {
                 Button("Open Settings") { onOpenSettings("mic") }.controlSize(.small)
