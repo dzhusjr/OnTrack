@@ -471,12 +471,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.showToast(store.state.paused ? "Paused. Nothing is recorded (⌥⇧P to resume)" : "Recording resumed")
     }
 
+    private var stopArmedUntil: Date?  // set by the first ⌥⇧S press while recording
+
     private func toggleRecording(askName: Bool) {
         if store.state.engineState == "stopping" {  // second press while the last words are still transcribed
             store.showToast("Stopping. Finishing the last phrases…")
             return
         }
         if store.state.recording {
+            // The shortcut sits next to ⌥⇧A (reply), so ending a session needs a second press within 4 seconds.
+            if !askName {
+                guard let until = stopArmedUntil, until > Date() else {
+                    stopArmedUntil = Date().addingTimeInterval(4)
+                    store.showToast("Press ⌥⇧S again to finish the session")
+                    return
+                }
+                stopArmedUntil = nil
+            }
             client.send(.stopSession)
             store.showToast("Stopping. Finishing the last phrases…")  // instant feedback; the save card follows
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.capture.stop() }
