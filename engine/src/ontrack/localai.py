@@ -83,6 +83,7 @@ class MlxProvider:
         self._model = None
         self._tok = None
         self._loaded: str | None = None
+        self._model_bytes = 0  # what loading this model added (the engine's Whisper models share MLX memory)
 
     # -- helpers
     def _module(self):
@@ -132,7 +133,9 @@ class MlxProvider:
         def work():
             self._model = self._tok = None
             gc.collect()
+            before = self._active_bytes()
             self._model, self._tok = lm.load(path)
+            self._model_bytes = max(0, self._active_bytes() - before)
             self._loaded = model
 
         try:
@@ -163,15 +166,18 @@ class MlxProvider:
         self._ex.shutdown(wait=True)
         self._ex = None
 
-    def memory_mb(self) -> int | None:
-        if self._loaded is None:
-            return None
+    @staticmethod
+    def _active_bytes() -> int:
         try:
             import mlx.core as mx  # noqa: PLC0415
 
-            return int(mx.get_active_memory() / 1e6)
+            return int(mx.get_active_memory())
         except Exception:  # noqa: BLE001
-            return None
+            return 0
+
+    def memory_mb(self) -> int | None:
+        """Memory this model added when it was loaded (not the whole engine, which also holds Whisper)."""
+        return int(self._model_bytes / 1e6) if self._loaded is not None and self._model_bytes else None
 
     def stream(self, prompt: str, model: str, max_tokens: int, timeout_s: float) -> Iterator[str]:
         if self._loaded != model:
