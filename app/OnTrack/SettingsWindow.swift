@@ -221,7 +221,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 ("Saving", "tray.and.arrow.down", AnyView(SavingTab(model: model))),
                 ("Advanced", "wrench.and.screwdriver", AnyView(AdvancedTab(model: model))),
             ] {
-                let vc = NSHostingController(rootView: view.contentMargins(.top, 14, for: .scrollContent).safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 10) }.frame(width: 520, height: 560).background(Color(nsColor: .windowBackgroundColor)))
+                let vc = NSHostingController(rootView: view.contentMargins(.top, 14, for: .scrollContent).frame(width: 520, height: 560).background(Color(nsColor: .windowBackgroundColor)))
                 vc.title = title
                 let item = NSTabViewItem(viewController: vc)
                 item.label = title
@@ -306,6 +306,7 @@ private struct GeneralTab: View {
                     Button(model.hasVoiceprint ? "Enroll Again…" : "Enroll My Voice…") { model.actions.enroll() }
                 }
             }
+            EndPadding()
         }
         .formStyle(.grouped)
     }
@@ -377,6 +378,7 @@ private struct AssistantTab: View {
                     if model.project != nil { Button("Clear") { model.setProject(nil) } }
                 }
             }
+            EndPadding()
         }
         .formStyle(.grouped)
     }
@@ -424,6 +426,7 @@ private struct SavingTab: View {
                     if model.exportFolder != nil { Button("Stop") { model.clearExportFolder() } }
                 }
             }
+            EndPadding()
         }
         .formStyle(.grouped)
     }
@@ -484,6 +487,7 @@ private struct AdvancedTab: View {
                 PathRow(title: "Sessions", url: model.sessionsDir) { Button("Show") { model.actions.open(model.sessionsDir) } }
                 PathRow(title: "Logs", url: model.logsDir) { Button("Show") { model.actions.open(model.logsDir) } }
             }
+            EndPadding()
         }
         .formStyle(.grouped)
         .onDisappear { model.commitEngine() }
@@ -514,6 +518,12 @@ private struct EngineField: View {
 }
 
 // MARK: small pieces
+
+/// Space after the last card, part of the scrolled content so it is always there at the end.
+private struct EndPadding: View {
+    var body: some View { Section {} footer: { Color.clear.frame(height: 10) } }
+}
+
 
 private struct Caption: View {
     let text: String
