@@ -108,11 +108,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func show() {
         model.reload()
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
-                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "OnTrack Settings"
+            // Native preferences look: tabs as toolbar icons, window titled after the tab.
+            let tabs = NSTabViewController()
+            tabs.tabStyle = .toolbar
+            tabs.canPropagateSelectedChildViewControllerTitle = true
+            for (title, icon, view) in [
+                ("General", "gearshape", AnyView(GeneralTab(model: model))),
+                ("Assistant", "sparkles", AnyView(AssistantTab(model: model))),
+                ("Saving", "tray.and.arrow.down", AnyView(SavingTab(model: model))),
+                ("Advanced", "wrench.and.screwdriver", AnyView(AdvancedTab(model: model))),
+            ] {
+                let vc = NSHostingController(rootView: view.frame(width: 520, height: 440))
+                vc.title = title
+                let item = NSTabViewItem(viewController: vc)
+                item.label = title
+                item.image = NSImage(systemSymbolName: icon, accessibilityDescription: title)
+                tabs.addTabViewItem(item)
+            }
+            let w = NSWindow(contentViewController: tabs)
+            w.styleMask = [.titled, .closable]
+            w.toolbarStyle = .preference
             w.isReleasedWhenClosed = false
-            w.contentViewController = NSHostingController(rootView: SettingsView(model: model))
             w.center()
             w.delegate = self
             window = w
@@ -133,20 +149,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 }
 
 // MARK: views
-
-struct SettingsView: View {
-    @ObservedObject var model: SettingsModel
-
-    var body: some View {
-        TabView {
-            GeneralTab(model: model).tabItem { Label("General", systemImage: "gearshape") }
-            AssistantTab(model: model).tabItem { Label("Assistant", systemImage: "sparkles") }
-            SavingTab(model: model).tabItem { Label("Saving", systemImage: "tray.and.arrow.down") }
-            AdvancedTab(model: model).tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
-        }
-        .frame(width: 560, height: 460)
-    }
-}
 
 private struct GeneralTab: View {
     @ObservedObject var model: SettingsModel
