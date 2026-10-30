@@ -86,19 +86,15 @@ final class SettingsModel: ObservableObject {
 
     // MARK: engine config (config.toml); empty = the engine's default
     static let engineDefaults: [String: String] = [
-        "whisper_model": "mlx-community/whisper-large-v3-turbo",
-        "final_whisper_model": "mlx-community/whisper-large-v3-mlx",
         "llm_model": "sonnet",
         "fast_llm_model": "haiku",
         "allowed_langs": "en, nl, uk",
     ]
-    @Published var liveModel = ""
-    @Published var finalModel = ""
-    @Published var summaryModel = ""
-    @Published var fastModel = ""
+    @Published var summaryModel = "sonnet" { didSet { guard loaded else { return }; commitEngine() } }
+    @Published var fastModel = "haiku" { didSet { guard loaded else { return }; commitEngine() } }
     @Published var aboutMe = ""
     @Published var vocabulary = ""
-    @Published var languages = ""
+    @Published var languages = "en, nl, uk" { didSet { guard loaded else { return }; commitEngine() } }
     @Published var livePreview = true { didSet { guard loaded else { return }; commitEngine() } }
     @Published var collectSpeech = true { didSet { guard loaded else { return }; commitEngine() } }
     @Published var engineChanged = false  // saved, but the engine only reads it at launch
@@ -107,13 +103,11 @@ final class SettingsModel: ObservableObject {
 
     private func loadEngine() {
         let c = EngineConfigFile(url: configFile)
-        liveModel = c.string("whisper_model") ?? ""
-        finalModel = c.string("final_whisper_model") ?? ""
-        summaryModel = c.string("llm_model") ?? ""
-        fastModel = c.string("fast_llm_model") ?? ""
+        summaryModel = c.string("llm_model") ?? Self.engineDefaults["llm_model"]!
+        fastModel = c.string("fast_llm_model") ?? Self.engineDefaults["fast_llm_model"]!
         aboutMe = c.string("about_me") ?? ""
         vocabulary = (c.strings("vocabulary") ?? []).joined(separator: ", ")
-        languages = (c.strings("allowed_langs") ?? []).joined(separator: ", ")
+        languages = (c.strings("allowed_langs") ?? Self.list(Self.engineDefaults["allowed_langs"]!)).joined(separator: ", ")
         livePreview = c.bool("live_preview") ?? true
         collectSpeech = c.bool("collect_my_speech") ?? true
     }
@@ -130,8 +124,6 @@ final class SettingsModel: ObservableObject {
             let v = value.trimmingCharacters(in: .whitespaces)
             c.set(key, string: v.isEmpty || v == Self.engineDefaults[key] ? nil : v)
         }
-        text("whisper_model", liveModel)
-        text("final_whisper_model", finalModel)
         text("llm_model", summaryModel)
         text("fast_llm_model", fastModel)
         text("about_me", aboutMe)
@@ -148,6 +140,22 @@ final class SettingsModel: ObservableObject {
         } catch {
             NSSound.beep()
         }
+    }
+
+    static let detectable: [(code: String, name: String)] = [("en", "English"), ("nl", "Dutch"), ("uk", "Ukrainian"), ("ru", "Russian")]
+
+    var detectedLanguageNames: String {
+        let names = Self.detectable.filter { detects($0.code) }.map(\.name)
+        return names.count > 1 ? names.dropLast().joined(separator: ", ") + " and " + names.last! : names.first ?? ""
+    }
+
+    func detects(_ code: String) -> Bool { Self.list(languages).contains(code) }
+
+    /// At least one language must stay on.
+    func setDetects(_ code: String, _ on: Bool) {
+        var codes = Set(Self.list(languages))
+        if on { codes.insert(code) } else if codes.count > 1 { codes.remove(code) }
+        languages = Self.detectable.map(\.code).filter(codes.contains).joined(separator: ", ")
     }
 
     func restartEngine() {
@@ -261,6 +269,11 @@ private struct GeneralTab: View {
                     Text(model.liveByDefault ? "Text appears as people speak. Pause it anytime with ⌥⇧L."
                                              : "Only audio is recorded and transcribed when you save. Turn it on anytime with ⌥⇧L.")
                 }
+                Toggle(isOn: $model.livePreview) {
+                    Text("Word-by-word preview")
+                    Text(model.livePreview ? "A grey preview line shows words as they are spoken. Uses more battery."
+                                           : "Lines appear once a phrase is finished. Easier on the battery.")
+                }
             }
             Section("Language") {
                 Picker(selection: $model.language) {
@@ -268,7 +281,7 @@ private struct GeneralTab: View {
                 } label: {
                     Text("Transcribe in")
                     Text(model.language == "auto"
-                         ? "Detects English, Dutch and Ukrainian phrase by phrase."
+                         ? "Detects \(model.detectedLanguageNames) phrase by phrase. Change this under Advanced."
                          : "Everything is transcribed as \(model.languageTitle). Use Automatic for mixed talks.")
                 }
             }
@@ -329,6 +342,15 @@ private struct AssistantTab: View {
                     Text("Interview mode")
                     Text(model.interview ? "A reply appears for every question someone asks, from general knowledge, without your project."
                                          : "Off. Replies only when someone says your name.")
+                }
+                if model.interview {
+                    EngineField(title: "About me", caption: "One line so interview answers fit you, e.g. a backend engineer (Python, Go).",
+                                prompt: "a software engineer", text: $model.aboutMe, commit: model.commitEngine)
+                }
+                Toggle(isOn: $model.collectSpeech) {
+                    Text("Learn how I speak")
+                    Text(model.collectSpeech ? "Your lines are kept on this Mac so replies sound like you."
+                                             : "Off. Replies use a neutral, polite style.")
                 }
                 Toggle(isOn: $model.connectors) {
                     Text("Use connectors (Jira, mail, calendar)")
@@ -412,42 +434,48 @@ private struct SavingTab: View {
 private struct AdvancedTab: View {
     @ObservedObject var model: SettingsModel
 
+    private static let claudeModels: [(id: String, name: String)] = [
+        ("haiku", "Haiku (fastest)"), ("sonnet", "Sonnet (balanced)"), ("opus", "Opus (most capable)"),
+    ]
+
+    /// The listed models, plus whatever is already set in config.toml so the picker never shows a blank.
+    private func choices(including current: String) -> [(id: String, name: String)] {
+        Self.claudeModels.contains { $0.id == current } ? Self.claudeModels : Self.claudeModels + [(current, current)]
+    }
+
     var body: some View {
         Form {
-            Section("Transcription") {
-                EngineField(title: "Live model", caption: "Used while people speak. A Hugging Face MLX Whisper repo.",
-                            prompt: SettingsModel.engineDefaults["whisper_model"]!, text: $model.liveModel, commit: model.commitEngine)
-                EngineField(title: "Saved transcript model", caption: "Used when a session is improved. Slower and more accurate.",
-                            prompt: SettingsModel.engineDefaults["final_whisper_model"]!, text: $model.finalModel, commit: model.commitEngine)
-                EngineField(title: "Languages", caption: "Codes the engine may pick from, separated by commas. Add ru only if you want Russian output.",
-                            prompt: SettingsModel.engineDefaults["allowed_langs"]!, text: $model.languages, commit: model.commitEngine)
-                EngineField(title: "Vocabulary", caption: "Names and terms Whisper should spell right, separated by commas.",
-                            prompt: "Kubernetes, eigenvalue", text: $model.vocabulary, commit: model.commitEngine)
-                Toggle(isOn: $model.livePreview) {
-                    Text("Word-by-word preview")
-                    Text(model.livePreview ? "A grey preview line while someone speaks. Uses more battery."
-                                           : "Lines appear once a phrase is finished. Easier on the battery.")
+            Section("Claude models") {
+                Picker(selection: $model.summaryModel) {
+                    ForEach(choices(including: model.summaryModel), id: \.id) { Text($0.name).tag($0.id) }
+                } label: {
+                    Text("Notes and summaries")
+                    Text("Written after a session. A more capable model takes longer.")
+                }
+                Picker(selection: $model.fastModel) {
+                    ForEach(choices(including: model.fastModel), id: \.id) { Text($0.name).tag($0.id) }
+                } label: {
+                    Text("Live answers and replies")
+                    Text("Answers questions and drafts replies while you talk. Faster is better here.")
                 }
             }
-            Section("Claude") {
-                EngineField(title: "Summary model", caption: "Writes the end-of-session notes.",
-                            prompt: SettingsModel.engineDefaults["llm_model"]!, text: $model.summaryModel, commit: model.commitEngine)
-                EngineField(title: "Fast model", caption: "Answers live questions and drafts replies.",
-                            prompt: SettingsModel.engineDefaults["fast_llm_model"]!, text: $model.fastModel, commit: model.commitEngine)
-                EngineField(title: "About me", caption: "One line for Interview Mode, e.g. a backend engineer (Python, Go).",
-                            prompt: "a software engineer", text: $model.aboutMe, commit: model.commitEngine)
-                Toggle(isOn: $model.collectSpeech) {
-                    Text("Learn how I speak")
-                    Text(model.collectSpeech ? "Your lines are kept on this Mac so replies sound like you."
-                                             : "Replies use a neutral, polite style.")
+            Section("Languages in Automatic mode") {
+                ForEach(SettingsModel.detectable, id: \.code) { lang in
+                    Toggle(lang.name, isOn: Binding(get: { model.detects(lang.code) },
+                                                    set: { model.setDetects(lang.code, $0) }))
                 }
+                Caption("Fewer languages means fewer mistakes when speech is unclear.")
+            }
+            Section("Spelling") {
+                EngineField(title: "Names and terms", caption: "Words that are often misheard, separated by commas.",
+                            prompt: "None", text: $model.vocabulary, commit: model.commitEngine)
             }
             Section("Engine") {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.engineChanged ? "Restart to apply" : "Config file")
                         Caption(model.engineChanged ? "Changes are saved. The engine reads them when it starts."
-                                                    : "Everything else (thresholds, timeouts) lives in config.toml.")
+                                                    : "Thresholds and timeouts live in config.toml.")
                     }
                     Spacer()
                     if model.engineChanged { Button("Restart Engine") { model.restartEngine() }.buttonStyle(.borderedProminent) }
