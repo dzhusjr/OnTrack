@@ -15,7 +15,7 @@ from test_engine import SPEECH, Client, dirs, make_service, run_with, typ  # noq
 from ontrack.ai import AiRouter, for_task
 from ontrack.config import Config
 from ontrack.llm import LlmError
-from ontrack.localai import LocalAi, MlxProvider, OllamaProvider, installed_mlx_models
+from ontrack.localai import LocalAi, MlxProvider, OllamaProvider, cached_snapshot, installed_mlx_models
 from ontrack.types import Channel
 
 QUICK = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
@@ -260,8 +260,19 @@ def test_mlx_provider_loads_lazily_from_the_cache_and_streams(tmp_path):
     assert prov.loaded() is None
 
 
-def test_mlx_missing_model_error_says_how_to_fix_it_and_never_downloads(monkeypatch):
-    prov = MlxProvider(lm=object())
+def test_a_model_mlx_lm_downloaded_is_found_even_without_readme_and_gitattributes(tmp_path):
+    snap = tmp_path / "models--mlx-community--Qwen3-4B-Instruct-2507-4bit" / "snapshots" / "50d4"
+    snap.mkdir(parents=True)
+    (snap / "config.json").write_text("{}")
+    (snap / "model.safetensors").write_text("x")
+    (snap.parent.parent / "refs").mkdir()
+    (snap.parent.parent / "refs" / "main").write_text("50d4")  # no .gitattributes / README.md in the snapshot
+    assert cached_snapshot("mlx-community/Qwen3-4B-Instruct-2507-4bit", tmp_path) == str(snap)
+    assert cached_snapshot("mlx-community/other", tmp_path) is None
+
+
+def test_mlx_missing_model_error_says_how_to_fix_it_and_never_downloads(monkeypatch, tmp_path):
+    prov = MlxProvider(lm=object(), cache=tmp_path)
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     with pytest.raises(LlmError) as e:
         prov.load("mlx-community/does-not-exist-4bit")

@@ -51,6 +51,25 @@ def installed_mlx_models(cache: Path | None = None) -> list[str]:
     return out
 
 
+def cached_snapshot(repo: str, cache: Path | None = None) -> str | None:
+    """Folder of a model already in the Hugging Face cache, or None. Only the files a model needs have to be
+    there (config + weights): `mlx_lm` itself skips README and .gitattributes, so a strict "complete snapshot"
+    check would reject models it downloaded."""
+    d = (cache or _hf_cache()) / ("models--" + repo.replace("/", "--"))
+    candidates: list[Path] = []
+    ref = d / "refs" / "main"
+    try:
+        if ref.exists():
+            candidates.append(d / "snapshots" / ref.read_text().strip())
+        candidates += sorted((d / "snapshots").glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    for snap in candidates:
+        if (snap / "config.json").exists() and any(snap.glob("*.safetensors")):
+            return str(snap)
+    return None
+
+
 # ---------------------------------------------------------------------------------------------- MLX
 class MlxProvider:
     """mlx-lm in this process. All model work happens on one dedicated thread (MLX streams are per thread)."""
@@ -87,13 +106,10 @@ class MlxProvider:
             return self._resolve(repo)
         if Path(repo).expanduser().is_dir():
             return str(Path(repo).expanduser())
-        try:
-            from huggingface_hub import snapshot_download  # noqa: PLC0415
-
-            return snapshot_download(repo, local_files_only=True)
-        except Exception as e:  # noqa: BLE001 — not cached, or huggingface_hub missing
-            raise LlmError("local_model_missing",
-                           f"{repo} is not downloaded. Run: uv run hf download {repo}") from e
+        found = cached_snapshot(repo, self._cache)
+        if found:
+            return found
+        raise LlmError("local_model_missing", f"{repo} is not downloaded. Run: uv run hf download {repo}")
 
     # -- provider interface
     def available(self) -> str | None:

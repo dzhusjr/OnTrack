@@ -70,12 +70,8 @@ local_ai() {
   prereqs || exit 1
   local model="${1:-mlx-community/Qwen3-4B-Instruct-2507-4bit}"
   (cd "$ROOT/engine" && uv sync --extra models --extra local-ai)
-  local why
-  if ! why=$(cd "$ROOT/engine" && uv run python -c "from huggingface_hub import snapshot_download as s; print(s('$model', local_files_only=True))" 2>&1); then
-    echo "→ Could not find $model in the Hugging Face cache (${HF_HOME:-$HOME/.cache/huggingface}):"
-    echo "  $(echo "$why" | tail -1)"
-    echo "  Models found there: $(ls "${HF_HOME:-$HOME/.cache/huggingface}/hub" 2>/dev/null | grep -i -E 'qwen|llama|mistral|gemma' | tr '\n' ' ')"
-    echo "  If it is not listed, download it once (about 2.5 GB):"
+  if ! (cd "$ROOT/engine" && uv run python -c "import sys; from ontrack.localai import cached_snapshot as c; sys.exit(0 if c('$model') else 1)"); then
+    echo "→ $model is not in the Hugging Face cache (${HF_HOME:-$HOME/.cache/huggingface}). Download it once (about 2.5 GB):"
     echo "  cd $ROOT/engine && uv run hf download $model"
     exit 1
   fi
