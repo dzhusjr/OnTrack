@@ -28,6 +28,20 @@ final class SettingsModel: ObservableObject {
     let actions: SettingsActions
 
     @Published var autoShow = true { didSet { guard loaded else { return }; settings.autoShowOverlay = autoShow; actions.autoShowChanged(autoShow) } }
+    @Published var startAtLogin = true {
+        didSet {
+            guard loaded, startAtLogin != LoginItem.isOn else { return }
+            do {
+                try LoginItem.set(startAtLogin)
+                loginNote = LoginItem.needsApproval ? Self.approveNote : ""
+            } catch {
+                reload()  // show what is really set
+                loginNote = "macOS refused: \(error.localizedDescription)"
+            }
+        }
+    }
+    @Published var loginNote = ""
+    private static let approveNote = "Approve OnTrack in System Settings → General → Login Items."
     @Published var liveByDefault = true { didSet { guard loaded else { return }; settings.liveByDefault = liveByDefault } }
     @Published var language = "auto" { didSet { guard loaded else { return }; settings.sessionLanguage = language; actions.sessionOptionsChanged() } }
     @Published var names = "" // committed on Return / leaving the field
@@ -72,6 +86,8 @@ final class SettingsModel: ObservableObject {
     func reload() {
         loaded = false
         autoShow = settings.autoShowOverlay
+        startAtLogin = LoginItem.isOn
+        loginNote = LoginItem.needsApproval ? Self.approveNote : ""
         liveByDefault = settings.liveByDefault
         language = settings.sessionLanguage
         names = settings.triggerWords.joined(separator: ", ")
@@ -306,6 +322,14 @@ private struct GeneralTab: View {
 
     var body: some View {
         Form {
+            Section("Startup") {
+                Toggle(isOn: $model.startAtLogin) {
+                    Text("Start OnTrack when I log in")
+                    Text(!model.loginNote.isEmpty ? model.loginNote
+                         : model.startAtLogin ? "OnTrack waits in the menu bar, ready for your next session."
+                                              : "Off. Open OnTrack yourself when you need it.")
+                }
+            }
             Section("Overlay") {
                 Toggle(isOn: $model.autoShow) {
                     Text("Show the live bar when recording starts")

@@ -89,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: settings.appSupportDir, withIntermediateDirectories: true)
+        LoginItem.applyDefaultOnce()  // start at login is on by default; Settings → General turns it off
 
         overlay = OverlayController(store: store,
                                     onOpenNotes: { [weak self] in
