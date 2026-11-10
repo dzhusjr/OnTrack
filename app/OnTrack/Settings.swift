@@ -34,6 +34,12 @@ struct Settings {
     }
 
     /// Live transcription when a session starts (off = record only, transcribed when saved).
+    /// Ask for a name each time a session starts (menu or ⌥⇧S). Off: "Session HH:MM" is used.
+    var askSessionName: Bool {
+        get { defaults.object(forKey: "askSessionName") as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: "askSessionName") }
+    }
+
     var liveByDefault: Bool {
         get { defaults.object(forKey: "liveByDefault") as? Bool ?? true }
         nonmutating set { defaults.set(newValue, forKey: "liveByDefault") }

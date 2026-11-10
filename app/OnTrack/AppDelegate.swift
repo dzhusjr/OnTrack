@@ -529,9 +529,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if store.state.mode == .done { store.send(.dismiss) }
         let fallback = "Session \(Self.timeFormatter.string(from: Date()))"
-        // Always ask, menu or ⌥⇧S alike. An empty answer keeps the time-stamped default; Cancel starts nothing.
-        guard let answer = Self.promptForName(defaultName: fallback) else { return }
-        let name = answer.isEmpty ? fallback : answer
+        // Ask (menu and ⌥⇧S alike) unless turned off in Settings. An empty answer keeps the time-stamped default; Cancel starts nothing.
+        let name: String
+        if settings.askSessionName {
+            guard let answer = Self.promptForName(defaultName: fallback) else { return }
+            name = answer.isEmpty ? fallback : answer
+        } else {
+            name = fallback
+        }
         store.sessionName = name
         client.holdAudio()  // released when the engine reports status=recording
         client.send(.startSession(name: name, sessionId: nil))

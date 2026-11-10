@@ -42,6 +42,7 @@ final class SettingsModel: ObservableObject {
     }
     @Published var loginNote = ""
     private static let approveNote = "Approve OnTrack in System Settings → General → Login Items."
+    @Published var askSessionName = true { didSet { guard loaded else { return }; settings.askSessionName = askSessionName } }
     @Published var liveByDefault = true { didSet { guard loaded else { return }; settings.liveByDefault = liveByDefault } }
     @Published var language = "auto" { didSet { guard loaded else { return }; settings.sessionLanguage = language; actions.sessionOptionsChanged() } }
     @Published var names = "" // committed on Return / leaving the field
@@ -88,6 +89,7 @@ final class SettingsModel: ObservableObject {
         autoShow = settings.autoShowOverlay
         startAtLogin = LoginItem.isOn
         loginNote = LoginItem.needsApproval ? Self.approveNote : ""
+        askSessionName = settings.askSessionName
         liveByDefault = settings.liveByDefault
         language = settings.sessionLanguage
         names = settings.triggerWords.joined(separator: ", ")
@@ -335,6 +337,11 @@ private struct GeneralTab: View {
                     Text("Show the live bar when recording starts")
                     Text(model.autoShow ? "The overlay opens when you start a session."
                                         : "Sessions start quietly. Show the overlay with ⌥Space.")
+                }
+                Toggle(isOn: $model.askSessionName) {
+                    Text("Ask for a session name")
+                    Text(model.askSessionName ? "A name box appears when you start, from the menu or with ⌥⇧S."
+                                              : "Sessions start right away and are named by the time, e.g. Session 14:30.")
                 }
                 Toggle(isOn: $model.liveByDefault) {
                     Text("Live transcription when a session starts")
