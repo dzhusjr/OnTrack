@@ -105,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     },
                                     onSaveTo: { [weak self] in self?.saveTo(notesPath: $0) })
         menu = MenuBarController(actions: .init(
-            startStop: { [weak self] in self?.toggleRecording(askName: true) },
+            startStop: { [weak self] in self?.toggleRecording(confirmStop: false) },
             toggleOverlay: { [weak self] in self?.store.send(.toggle) },
             enroll: { [weak self] in self?.startEnrollment() },
             retrySummary: { [weak self] in self?.retrySummary() },
@@ -263,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             [weak self] in self?.store.send(.toggle)
         }
         hotkeys.register(id: 2, keyCode: HotkeyService.optionShiftS.keyCode, modifiers: HotkeyService.optionShiftS.modifiers) {
-            [weak self] in self?.toggleRecording(askName: false)
+            [weak self] in self?.toggleRecording(confirmStop: true)
         }
         hotkeys.register(id: 3, keyCode: HotkeyService.optionShiftL.keyCode, modifiers: HotkeyService.optionShiftL.modifiers) {
             [weak self] in self?.store.toggleLive()
@@ -491,14 +491,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var stopArmedUntil: Date?  // set by the first ⌥⇧S press while recording
 
-    private func toggleRecording(askName: Bool) {
+    /// `confirmStop`: the ⌥⇧S shortcut needs a second press to end a session; the menu item does not.
+    private func toggleRecording(confirmStop: Bool) {
         if store.state.engineState == "stopping" {  // second press while the last words are still transcribed
             store.showToast("Stopping. Finishing the last phrases…")
             return
         }
         if store.state.recording {
             // The shortcut sits next to ⌥⇧A (reply), so ending a session needs a second press within 4 seconds.
-            if !askName {
+            if confirmStop {
                 guard let until = stopArmedUntil, until > Date() else {
                     stopArmedUntil = Date().addingTimeInterval(4)
                     store.showToast("Press ⌥⇧S again to finish the session")
@@ -528,13 +529,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if store.state.mode == .done { store.send(.dismiss) }
         let fallback = "Session \(Self.timeFormatter.string(from: Date()))"
-        let name: String
-        if askName {
-            guard let n = Self.promptForName(defaultName: fallback) else { return }
-            name = n.isEmpty ? fallback : n
-        } else {
-            name = fallback
-        }
+        // Always ask, menu or ⌥⇧S alike. An empty answer keeps the time-stamped default; Cancel starts nothing.
+        guard let answer = Self.promptForName(defaultName: fallback) else { return }
+        let name = answer.isEmpty ? fallback : answer
         store.sessionName = name
         client.holdAudio()  // released when the engine reports status=recording
         client.send(.startSession(name: name, sessionId: nil))
