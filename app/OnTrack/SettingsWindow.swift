@@ -43,6 +43,7 @@ final class SettingsModel: ObservableObject {
     @Published var loginNote = ""
     private static let approveNote = "Approve OnTrack in System Settings → General → Login Items."
     @Published var askSessionName = true { didSet { guard loaded else { return }; settings.askSessionName = askSessionName } }
+    @Published var autoStopMinutes = 0 { didSet { guard loaded else { return }; settings.autoStopMinutes = autoStopMinutes } }
     @Published var liveByDefault = true { didSet { guard loaded else { return }; settings.liveByDefault = liveByDefault } }
     @Published var language = "auto" { didSet { guard loaded else { return }; settings.sessionLanguage = language; actions.sessionOptionsChanged() } }
     @Published var names = "" // committed on Return / leaving the field
@@ -90,6 +91,7 @@ final class SettingsModel: ObservableObject {
         startAtLogin = LoginItem.isOn
         loginNote = LoginItem.needsApproval ? Self.approveNote : ""
         askSessionName = settings.askSessionName
+        autoStopMinutes = settings.autoStopMinutes
         liveByDefault = settings.liveByDefault
         language = settings.sessionLanguage
         names = settings.triggerWords.joined(separator: ", ")
@@ -332,16 +334,27 @@ private struct GeneralTab: View {
                                               : "Off. Open OnTrack yourself when you need it.")
                 }
             }
+            Section("Sessions") {
+                Toggle(isOn: $model.askSessionName) {
+                    Text("Ask for a session name")
+                    Text(model.askSessionName ? "A name box appears when you start, from the menu or with ⌥⇧S. It shows the project folder."
+                                              : "Sessions start right away and are named by the time, e.g. Session 14:30.")
+                }
+                Picker(selection: $model.autoStopMinutes) {
+                    Text("Never").tag(0)
+                    ForEach(IdleMonitor.choices.filter { $0 > 0 }, id: \.self) { Text("After \($0) min").tag($0) }
+                } label: {
+                    Text("Stop automatically when it is quiet")
+                    Text(model.autoStopMinutes == 0 ? "A forgotten session keeps recording until you stop it."
+                         : model.liveByDefault ? "Stops when no speech has been recognised for this long. If you turn live transcription off, it waits for silence instead."
+                                               : "Stops when no sound has come in for this long. If you turn live transcription on, it waits for speech instead.")
+                }
+            }
             Section("Overlay") {
                 Toggle(isOn: $model.autoShow) {
                     Text("Show the live bar when recording starts")
                     Text(model.autoShow ? "The overlay opens when you start a session."
                                         : "Sessions start quietly. Show the overlay with ⌥Space.")
-                }
-                Toggle(isOn: $model.askSessionName) {
-                    Text("Ask for a session name")
-                    Text(model.askSessionName ? "A name box appears when you start, from the menu or with ⌥⇧S."
-                                              : "Sessions start right away and are named by the time, e.g. Session 14:30.")
                 }
                 Toggle(isOn: $model.liveByDefault) {
                     Text("Live transcription when a session starts")

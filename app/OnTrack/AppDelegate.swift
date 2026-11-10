@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlay: OverlayController!
     private var cancellables: Set<AnyCancellable> = []
     private var enrolling = false
+    private let idle = IdleMonitor()  // how long the recording has been quiet (auto-stop)
+    private var idleTimer: Timer?
+    private var idleWasLive = true
     private let enrollmentWindow = EnrollmentWindowController()
     private var resumeSessionId: String?  // set while waiting for a restarted engine to resume our session
     private var lastFinalizeSessionId: String?
@@ -247,11 +250,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkIdle() }
+        }
         client.onMessage = { [weak self] msg in self?.handle(msg) }
         client.onConnectionChange = { [weak self] up in self?.connectionChanged(up) }
         capture.echoCancellation = settings.echoCancellation
         let client = self.client  // called on audio threads: don't touch main-actor state
+        let idle = self.idle
         capture.onFrame = { channel, t, samples in
+            idle.noteAudio(samples)
             client.sendAudio(channel: channel, tNs: t, samples: samples)
         }
         capture.onIssue = { [weak self] text in
@@ -347,14 +355,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 export(notesPath: path, to: NotesExporter.meetingsFolder(project: URL(fileURLWithPath: project),
                                                                         date: NotesLibrary.date(fromId: id) ?? Date()))
             }
+        case .line:
+            idle.noteSpeech()  // recognised speech: the recording is in use
         default:
             break
         }
         store.send(.engine(msg))
         if case let .status(st) = msg, st.state == "recording", let sid = st.sessionId, sid != policyAppliedSession {
             policyAppliedSession = sid  // new session: apply "live by default" and the battery rule once
+            idle.reset()
             applyLivePolicy(announce: false)
         }
+    }
+
+    /// Stops a recording nobody is using: no recognised speech (live on) or no sound (live off) for the chosen time.
+    private func checkIdle() {
+        let live = store.state.liveTranscription
+        if live != idleWasLive || store.state.paused || !store.state.recording {
+            idleWasLive = live
+            idle.reset()  // switching live on/off, pausing or not recording: start counting again
+            return
+        }
+        let minutes = settings.autoStopMinutes
+        guard idle.shouldStop(minutes: minutes, live: live, paused: false), store.state.engineState == "recording" else { return }
+        idle.reset()
+        client.send(.stopSession)
+        store.showToast("No \(live ? "speech" : "sound") for \(minutes) min. Session stopped.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.capture.stop() }
     }
 
     /// Live transcription on/off from the user's default and the battery rule (recording continues either way).
@@ -532,7 +559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ask (menu and ⌥⇧S alike) unless turned off in Settings. An empty answer keeps the time-stamped default; Cancel starts nothing.
         let name: String
         if settings.askSessionName {
-            guard let answer = Self.promptForName(defaultName: fallback) else { return }
+            guard let answer = Self.promptForName(defaultName: fallback, project: settings.projectDir) else { return }
             name = answer.isEmpty ? fallback : answer
         } else {
             name = fallback
@@ -644,10 +671,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return f
     }()
 
-    private static func promptForName(defaultName: String) -> String? {
+    private static func promptForName(defaultName: String, project: String?) -> String? {
         let alert = NSAlert()
         alert.messageText = "Start session"
-        alert.informativeText = "Name this lecture, meeting or conversation:"
+        let where_ = project.map { "Project folder: \(URL(fileURLWithPath: $0).lastPathComponent)" }
+            ?? "No project folder: answers use only the conversation"
+        alert.informativeText = "Name this lecture, meeting or conversation.\n\n\(where_). Change it in Settings → Assistant."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         field.placeholderString = defaultName
         alert.accessoryView = field

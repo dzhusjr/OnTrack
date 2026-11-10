@@ -40,6 +40,12 @@ struct Settings {
         nonmutating set { defaults.set(newValue, forKey: "askSessionName") }
     }
 
+    /// Minutes of silence after which a recording stops by itself. 0 = never.
+    var autoStopMinutes: Int {
+        get { defaults.object(forKey: "autoStopMinutes") as? Int ?? 0 }
+        nonmutating set { defaults.set(newValue, forKey: "autoStopMinutes") }
+    }
+
     var liveByDefault: Bool {
         get { defaults.object(forKey: "liveByDefault") as? Bool ?? true }
         nonmutating set { defaults.set(newValue, forKey: "liveByDefault") }
